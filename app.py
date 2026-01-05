@@ -56,7 +56,7 @@ for id_jogador, dados in jogadores.items():
         "ID": id_jogador,
         "Nome": dados["nome"],
         "Posição": dados["posicao"],
-        "Valor": dados["valor"],
+        "Valor": dados["preco"],
         "Gols": dados["gols"],
         "Assistências": dados["assistencias"]
     })
