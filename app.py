@@ -62,14 +62,15 @@ st.subheader("Jogadores disponíveis")
 dados_tabela = []
 
 for id_jogador, dados in jogadores.items():
+    
     dados_tabela.append({
-        "ID": id_jogador,
-        "Nome": dados["nome"],
-        "Posição": dados["posicao"],
-        "Valor": dados["preco"],
-        "Gols": dados["gols"],
-        "Assistências": dados["assistencias"]
-    })
+    "ID": id_jogador,
+    "Nome": dados["nome"],
+    "Valor": dados["preco"],
+    "Gols": dados["gols"],
+    "Assistências": dados["assistencias"]
+})
+
 
 st.dataframe(dados_tabela, use_container_width=True)
 

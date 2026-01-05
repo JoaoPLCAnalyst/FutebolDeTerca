@@ -1,26 +1,9 @@
 {
-  "1": {
-    "nome": "joao",
-    "posicao": "meia",
-    "preco": 10.0,
-    "gols" : 3,
-    "assistencias" : 5,
-    "pontos": 20.0
-  },
-  "2": {
-    "nome": "eudes",
-    "posicao": "atacante",
-    "preco": 5.0,
-    "gols" : 7,
-    "assistencias" : 3,
-    "pontos": 25.0
-  },
-  "3": {
-    "nome": "ana",
-    "posicao": "defensor",
-    "preco": 7.5,
-    "gols" : 1,
-    "assistencias" : 2,
-    "pontos": 12.5
-  }
+    "1": {
+        "nome": "João",
+        "preco": 10,
+        "gols": 0,
+        "assistencias": 0,
+        "foto": "imagens/jogadores/1.jpg"
+    }
 }
