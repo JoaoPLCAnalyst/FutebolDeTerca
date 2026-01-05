@@ -1,11 +1,4 @@
 {
-  "izadora-43d98ea0": {
-    "nome": "izadora",
-    "valor": 10,
-    "gols": 0,
-    "assistencias": 0,
-    "imagem": "imagens/jogadores/izadora-7c1a92ab.jpg"
-  },
   "joao-5c0f835c": {
     "nome": "joao",
     "valor": 10,
@@ -13,25 +6,11 @@
     "assistencias": 0,
     "imagem": "imagens/jogadores/joao-1a0f7147.jpg"
   },
-  "teste-fc971337": {
-    "nome": "teste",
+  "eudes-4655e992": {
+    "nome": "Eudes",
     "valor": 10,
     "gols": 0,
     "assistencias": 0,
-    "imagem": "imagens/jogadores/teste-2d3d20fe.jpg"
-  },
-  "cha-db4afee1": {
-    "nome": "cha",
-    "valor": 10,
-    "gols": 0,
-    "assistencias": 0,
-    "imagem": "imagens/jogadores/cha-5932862b.jpg"
-  },
-  "cachoeira-26435df5": {
-    "nome": "cachoeira",
-    "valor": 10,
-    "gols": 0,
-    "assistencias": 0,
-    "imagem": "imagens/jogadores/cachoeira-d41582f7.jpg"
+    "imagem": "imagens/jogadores/eudes-86905341.jpg"
   }
 }
