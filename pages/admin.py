@@ -6,7 +6,10 @@ import uuid
 import io
 from PIL import Image
 import base64, requests
+from utils.auth import require_admin
 
+require_admin()
+st.title("Área do Administrador")
 # =========================
 # CONFIGURAÇÃO DA PÁGINA
 # =========================
@@ -168,3 +171,5 @@ else:
                 github_upload(JOGADORES_FILE, JOGADORES_FILE, f"Remove jogador {j['nome']}")
                 st.success(f"Jogador {j['nome']} excluído!")
                 st.rerun()
+if st.button("Sair"):
+    logout()
