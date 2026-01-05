@@ -151,7 +151,7 @@ with col_reload:
     if st.button("🔄 Recarregar do GitHub"):
         # limpa caches para forçar novo fetch
         st.cache_data.clear()
-        st.experimental_rerun()
+        st.rerun()
 
 # Carrega jogadores (prefere GitHub)
 jogadores = carregar_jogadores(prefer_github=True)
