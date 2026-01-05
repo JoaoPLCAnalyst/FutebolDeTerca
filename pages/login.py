@@ -49,6 +49,12 @@ def check_password_for_userid_plain(user_id: str, password: str) -> bool:
         return False
     return password == pw_store
 
+# Se houver mensagem de login pendente na sessão, exibe e remove
+if st.session_state.get("login_message"):
+    st.success(st.session_state.get("login_message"))
+    # opcional: manter a mensagem por uma execução; removemos para não repetir
+    del st.session_state["login_message"]
+
 # Interface mínima
 st.title("🔐 Entrar")
 
@@ -79,18 +85,13 @@ if st.button("Entrar"):
                     saved = salvar_perfil(user_id, perfil)
                     if not saved:
                         st.warning("Login efetuado, mas não foi possível atualizar último_login no arquivo de perfil.")
+
+                    # sinaliza login na sessão
                     st.session_state["user_id"] = user_id
                     st.session_state["perfil"] = perfil
+                    st.session_state["logged_in"] = True
+                    st.session_state["login_message"] = f"Bem vindo, {perfil.get('nome_apresentacao', user_id)}!"
 
-                    # direciona para a página principal
-                    try:
-                        st.experimental_set_query_params(user=user_id, page="main")
-                    except Exception:
-                        # se experimental_set_query_params não estiver disponível, tenta setar apenas user
-                        try:
-                            st.experimental_set_query_params(user=user_id)
-                        except Exception:
-                            pass
-
-                    # reinicia a execução usando st.rerun()
+                    # mostra confirmação imediata (opcional) e reinicia para propagar session_state
+                    st.success(st.session_state["login_message"])
                     st.rerun()
