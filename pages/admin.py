@@ -2,16 +2,21 @@ import streamlit as st
 import json
 import base64
 import requests
-from datetime import datetime
+from PIL import Image
 
-st.set_page_config(page_title="Admin", page_icon="⚙️")
+# =========================
+# CONFIGURAÇÃO DA PÁGINA
+# =========================
+st.set_page_config(page_title="Admin - Futebol de Terça", page_icon="⚽")
 
-# ===============================
-# CONFIGURAÇÕES
-# ===============================
+PASSWORD = st.secrets["ADMIN_PASSWORD"]
+
 JOGADORES_FILE = "database/jogadores.json"
 IMAGENS_DIR = "imagens/jogadores"
 
+# =========================
+# GITHUB CONFIG
+# =========================
 GITHUB_USER = st.secrets["GITHUB_USER"]
 GITHUB_REPO = st.secrets["GITHUB_REPO"]
 GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
@@ -22,95 +27,131 @@ HEADERS = {
     "Accept": "application/vnd.github.v3+json"
 }
 
-# ===============================
+# =========================
 # FUNÇÕES GITHUB
-# ===============================
-
-def github_get_file(path):
+# =========================
+def github_read_file(path):
     url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}?ref={GITHUB_BRANCH}"
     r = requests.get(url, headers=HEADERS)
+
     if r.status_code == 200:
-        return r.json()
-    return None
+        data = r.json()
+        content = base64.b64decode(data["content"]).decode("utf-8")
+        return json.loads(content), data["sha"]
+
+    return [], None
 
 
-def github_put_file(path, content_bytes, message, sha=None):
+def github_save_file(path, content_bytes, message, sha=None):
     url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}"
+
     payload = {
         "message": message,
-        "content": base64.b64encode(content_bytes).decode(),
+        "content": base64.b64encode(content_bytes).decode("utf-8"),
         "branch": GITHUB_BRANCH
     }
+
     if sha:
         payload["sha"] = sha
 
     r = requests.put(url, headers=HEADERS, json=payload)
+
     if r.status_code not in [200, 201]:
-        st.error(f"Erro GitHub ({path}): {r.json()}")
+        st.error(f"Erro ao salvar {path}")
+        st.json(r.json())
         st.stop()
 
+# =========================
+# LOGIN
+# =========================
+if "auth" not in st.session_state:
+    st.session_state.auth = False
 
-# ===============================
+if not st.session_state.auth:
+    st.title("🔐 Área Administrativa")
+
+    senha = st.text_input("Senha", type="password")
+    if st.button("Entrar"):
+        if senha == PASSWORD:
+            st.session_state.auth = True
+            st.rerun()
+        else:
+            st.error("Senha incorreta")
+    st.stop()
+
+# =========================
 # INTERFACE
-# ===============================
-
-st.title("⚙️ Admin - Cadastro de Jogador")
+# =========================
+st.title("⚽ Cadastro de Jogadores")
 
 nome = st.text_input("Nome do jogador")
-posicao = st.text_input("Posição")
-imagem = st.file_uploader("Foto do jogador", type=["png", "jpg", "jpeg"])
+imagem = st.file_uploader("Imagem do jogador", type=["png", "jpg", "jpeg"])
 
+# =========================
+# CADASTRAR JOGADOR
+# =========================
 if st.button("Cadastrar jogador"):
-
-    if not nome or not posicao or not imagem:
-        st.warning("Preencha todos os campos")
+    if not nome or imagem is None:
+        st.error("Preencha o nome e envie uma imagem")
         st.stop()
 
-    # ===============================
-    # 1️⃣ CARREGA JOGADORES.JSON
-    # ===============================
-    file_data = github_get_file(JOGADORES_FILE)
+    # 1️⃣ Lê jogadores atuais do GitHub
+    jogadores, sha_json = github_read_file(JOGADORES_FILE)
 
-    if file_data:
-        jogadores = json.loads(base64.b64decode(file_data["content"]))
-        sha_json = file_data["sha"]
-    else:
-        jogadores = []
-        sha_json = None
+    # 2️⃣ Salva imagem no GitHub
+    ext = imagem.name.split(".")[-1].lower()
+    if ext == "jpeg":
+        ext = "jpg"
 
-    # ===============================
-    # 2️⃣ SALVA IMAGEM
-    # ===============================
-    ext = imagem.name.split(".")[-1]
     img_filename = f"{nome.lower().replace(' ', '_')}.{ext}"
     img_path = f"{IMAGENS_DIR}/{img_filename}"
 
-    github_put_file(
+    github_save_file(
         img_path,
         imagem.getvalue(),
         f"Adiciona imagem do jogador {nome}"
     )
 
-    # ===============================
-    # 3️⃣ ATUALIZA JSON
-    # ===============================
-    jogador = {
+    # 3️⃣ Adiciona jogador no JSON
+    novo_jogador = {
         "nome": nome,
-        "posicao": posicao,
-        "imagem": img_path,
-        "criado_em": datetime.now().isoformat()
+        "valor": 10,
+        "gols": 0,
+        "assistencias": 0,
+        "imagem": img_path
     }
 
-    jogadores.append(jogador)
+    jogadores.append(novo_jogador)
 
-    github_put_file(
+    # 4️⃣ Commit do jogadores.json
+    github_save_file(
         JOGADORES_FILE,
-        json.dumps(jogadores, indent=2).encode(),
+        json.dumps(jogadores, indent=2, ensure_ascii=False).encode("utf-8"),
         f"Adiciona jogador {nome}",
         sha=sha_json
     )
 
-    # ===============================
-    # 4️⃣ SUCESSO
-    # ===============================
-    st.success("✅ Jogador cadastrado e commitado no GitHub!")
+    st.success("✅ Jogador cadastrado e salvo no GitHub!")
+    st.rerun()
+
+# =========================
+# LISTA DE JOGADORES
+# =========================
+st.markdown("### 📋 Jogadores cadastrados")
+
+jogadores, _ = github_read_file(JOGADORES_FILE)
+
+if not jogadores:
+    st.info("Nenhum jogador cadastrado")
+else:
+    for j in jogadores:
+        with st.container(border=True):
+            col1, col2 = st.columns([1, 4])
+
+            with col1:
+                img_url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{GITHUB_BRANCH}/{j['imagem']}"
+                st.image(img_url, width=80)
+
+            with col2:
+                st.write(f"**{j['nome']}**")
+                st.write(f"Gols: {j['gols']} | Assistências: {j['assistencias']}")
