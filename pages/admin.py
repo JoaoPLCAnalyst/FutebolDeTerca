@@ -120,6 +120,19 @@ def github_save_file(path, content_bytes, message, sha=None):
     else:
         st.error(f"Erro ao salvar {path}: status {r.status_code}")
         raise RuntimeError(f"GitHub save error {r.status_code}")
+def github_delete_file(path, message, sha):
+    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}"
+    payload = {
+        "message": message,
+        "sha": sha,
+        "branch": GITHUB_BRANCH
+    }
+    r = requests.delete(url, headers=HEADERS, json=payload)
+    if r.status_code == 200:
+        return r.json()
+    else:
+        st.error(f"Erro ao excluir {path}: status {r.status_code}")
+        raise RuntimeError(f"GitHub delete error {r.status_code}")
 
 # =========================
 # LOGIN
@@ -272,7 +285,7 @@ if st.button("Cadastrar jogador"):
 st.markdown("### 📋 Jogadores cadastrados")
 
 try:
-    jogadores_dict, _ = github_read_file(JOGADORES_FILE)
+    jogadores_dict, sha_json = github_read_file(JOGADORES_FILE)
 except Exception:
     st.error("Não foi possível carregar a lista de jogadores.")
     st.stop()
@@ -280,11 +293,11 @@ except Exception:
 if not jogadores_dict:
     st.info("Nenhum jogador cadastrado")
 else:
-    # Ordena por nome para exibição (opcional)
+    # Ordena por nome para exibição
     sorted_items = sorted(jogadores_dict.items(), key=lambda kv: kv[1].get("nome", "").lower())
     for player_id, j in sorted_items:
         with st.container():
-            col1, col2 = st.columns([1, 4])
+            col1, col2, col3 = st.columns([1, 3, 1])
 
             with col1:
                 img_url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{GITHUB_BRANCH}/{j['imagem']}"
@@ -293,5 +306,38 @@ else:
             with col2:
                 st.write(f"**{j.get('nome', '—')}**")
                 st.write(f"Gols: {j.get('gols', 0)} | Assistências: {j.get('assistencias', 0)}")
-                # Exibe o id (útil para operações futuras de edição/remoção)
                 st.caption(f"ID: {player_id}")
+
+            with col3:
+                if st.button("🗑️ Excluir", key=f"del-{player_id}"):
+                    # 1️⃣ Recarrega jogadores atuais
+                    jogadores_dict, sha_json = github_read_file(JOGADORES_FILE)
+
+                    # 2️⃣ Remove jogador do dicionário
+                    if player_id in jogadores_dict:
+                        jogador_removido = jogadores_dict.pop(player_id)
+
+                        # 3️⃣ Atualiza jogadores.json no GitHub
+                        github_save_file(
+                            JOGADORES_FILE,
+                            json.dumps(jogadores_dict, indent=2, ensure_ascii=False).encode("utf-8"),
+                            f"Remove jogador {jogador_removido['nome']}",
+                            sha=sha_json
+                        )
+
+                        # 4️⃣ Opcional: excluir imagem associada
+                        try:
+                            url_img = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{jogador_removido['imagem']}?ref={GITHUB_BRANCH}"
+                            r = requests.get(url_img, headers=HEADERS)
+                            if r.status_code == 200:
+                                sha_img = r.json()["sha"]
+                                github_delete_file(
+                                    jogador_removido["imagem"],
+                                    f"Remove imagem do jogador {jogador_removido['nome']}",
+                                    sha_img
+                                )
+                        except Exception:
+                            st.warning("Imagem não pôde ser removida, mas jogador foi excluído.")
+
+                        st.success(f"Jogador {jogador_removido['nome']} excluído com sucesso!")
+                        st.rerun()
