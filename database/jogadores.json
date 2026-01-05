@@ -5,5 +5,12 @@
     "gols": 0,
     "assistencias": 0,
     "imagem": "imagens/jogadores/izadora.jpg"
+  },
+  {
+    "nome": "joao",
+    "valor": 10,
+    "gols": 0,
+    "assistencias": 0,
+    "imagem": "imagens/jogadores/joao.jpg"
   }
 ]
