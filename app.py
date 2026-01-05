@@ -11,7 +11,7 @@ from typing import Dict, Any, Optional
 st.set_page_config(page_title="Futebol de Terça", layout="wide")
 JOGADORES_FILE = "database/jogadores.json"  # fallback local
 GITHUB_COMMITS_ENDPOINT = "https://api.github.com/repos/{user}/{repo}/commits"
-AUTOREFRESH_INTERVAL_MS = 15_000  # intervalo de auto-refresh no navegador (ms)
+AUTOREFRESH_INTERVAL_MS = 1_000  # intervalo de auto-refresh no navegador (ms)
 
 # =========================
 # HELPERS
@@ -159,11 +159,7 @@ def carregar_jogadores_local_no_cache() -> Dict[str, dict]:
 # FLUXO PRINCIPAL: detectar commit e atualizar
 # =========================
 def carregar_jogadores_detect_commit(path: str = "database/jogadores.json") -> Dict[str, dict]:
-    """
-    Verifica o SHA do último commit que modificou `path`. Se for diferente do SHA
-    salvo em st.session_state, baixa o JSON do GitHub (raw) e atualiza session_state.
-    Se não conseguir usar GitHub, faz fallback para arquivo local.
-    """
+   
     if "_jogadores_sha" not in st.session_state:
         st.session_state["_jogadores_sha"] = None
     if "_jogadores_data" not in st.session_state:
@@ -201,10 +197,7 @@ def carregar_jogadores_detect_commit(path: str = "database/jogadores.json") -> D
 # AUTOREFRESH (usa streamlit-autorefresh se disponível, fallback JS)
 # =========================
 def ensure_autorefresh(interval_ms: int):
-    """
-    Força o navegador a recarregar periodicamente para disparar nova execução do script.
-    Usa streamlit-autorefresh quando disponível; caso contrário injeta um pequeno JS.
-    """
+
     try:
         from streamlit_autorefresh import st_autorefresh
         st_autorefresh(interval=interval_ms, limit=None, key="autorefresh")
