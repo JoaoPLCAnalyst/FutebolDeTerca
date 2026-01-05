@@ -2,6 +2,20 @@ import streamlit as st
 import json
 import os
 from typing import Dict, Any
+import os, json, streamlit as st
+
+st.write("CWD:", os.getcwd())
+st.write("JOGADORES_FILE exists:", os.path.exists("database/jogadores.json"))
+
+try:
+    with open("database/jogadores.json", "r", encoding="utf-8") as f:
+        raw = f.read()
+    st.write("Raw file length:", len(raw))
+    st.write("Preview:", raw[:1000])
+    parsed = json.loads(raw)
+    st.write("Parsed type:", type(parsed).__name__)
+except Exception as e:
+    st.write("Erro ao ler/parsear arquivo:", e)
 
 # =========================
 # CONFIG
