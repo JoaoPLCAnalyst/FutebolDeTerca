@@ -117,7 +117,7 @@ if st.button("Entrar"):
                     st.session_state["perfil"] = perfil
                     st.success(f"Bem vindo, {perfil.get('nome_apresentacao', user_id)}!")
                     st.experimental_set_query_params(user=user_id)
-                    st.experimental_rerun()
+                    st.rerun()
 
 st.markdown("---")
 st.markdown("**Observações**")
