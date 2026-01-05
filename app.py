@@ -13,6 +13,10 @@ def carregar_jogadores():
     with open("jogadores.json", "r", encoding="utf-8") as f:
         return json.load(f)
 
+def imagem_github_url(caminho):
+    repo = st.secrets["GITHUB_REPO"]
+    return f"https://raw.githubusercontent.com/{repo}/main/{caminho}"
+
 # =========================
 # INTERFACE
 # =========================
@@ -20,24 +24,20 @@ st.title("⚽ Futebol de Terça")
 
 jogadores = carregar_jogadores()
 
-st.subheader("Jogadores disponíveis")
+cols = st.columns(4)
 
-for id_jogador, dados in jogadores.items():
-    col_img, col_info = st.columns([1, 4])
+for jogador_id, j in jogadores.items():
+    with st.container(border=True):
+        if j.get("foto"):
+            st.image(
+                imagem_github_url(j["foto"]),
+                width=120
+            )
 
-    with col_img:
-        if dados.get("foto"):
-            st.image(dados["foto"], width=80)
-        else:
-            st.markdown("❌ Sem foto")
-
-    with col_info:
-        st.markdown(f"""
-        **{dados["nome"]}**  
-        💰 Valor: {dados["preco"]}  
-        ⚽ Gols: {dados["gols"]}  
-        🎯 Assistências: {dados["assistencias"]}
-        """)
+        st.markdown(f"**{j['nome']}**")
+        st.write(f"Gols: {j['gols']}")
+        st.write(f"Assistências: {j['assistencias']}")
+        st.write(f"Valor: {j['preco']}")
 
     st.divider()
 
