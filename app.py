@@ -11,18 +11,24 @@ st.set_page_config(
     layout="wide"
 )
 
+ARQUIVO_JOGADORES = "jogadores.json"
+
 # =========================
-# FUNÇÕES DE DADOS
+# FUNÇÕES DE DADOS (LOCAL)
 # =========================
 
 def carregar_jogadores():
-    """
-    Força a leitura do arquivo SEM cache interno.
-    Garante atualização após commits no GitHub.
-    """
-    with open("jogadores.json", "r", encoding="utf-8") as f:
-        return json.loads(f.read())
+    with open(ARQUIVO_JOGADORES, "r", encoding="utf-8") as f:
+        return json.load(f)
 
+
+def salvar_jogadores_local(jogadores):
+    with open(ARQUIVO_JOGADORES, "w", encoding="utf-8") as f:
+        json.dump(jogadores, f, indent=4, ensure_ascii=False)
+
+# =========================
+# FUNÇÕES GITHUB (BACKUP)
+# =========================
 
 def conectar_github():
     g = Github(st.secrets["GITHUB_TOKEN"])
@@ -33,11 +39,11 @@ def conectar_github():
 def salvar_jogadores_no_github(jogadores, mensagem_commit):
     repo = conectar_github()
 
-    arquivo = repo.get_contents("jogadores.json")
+    arquivo = repo.get_contents(ARQUIVO_JOGADORES)
     conteudo = json.dumps(jogadores, indent=4, ensure_ascii=False)
 
     repo.update_file(
-        path="jogadores.json",
+        path=ARQUIVO_JOGADORES,
         message=mensagem_commit,
         content=conteudo,
         sha=arquivo.sha
@@ -102,17 +108,22 @@ if senha == st.secrets["ADMIN_PASSWORD"]:
         )
 
     if st.button("💾 Salvar alterações"):
+        # 1️⃣ Atualiza em memória
         jogadores[id_selecionado]["gols"] = gols
         jogadores[id_selecionado]["assistencias"] = assistencias
 
+        # 2️⃣ Salva LOCALMENTE (FONTE DA VERDADE)
+        salvar_jogadores_local(jogadores)
+
+        # 3️⃣ Envia ao GitHub (BACKUP)
         salvar_jogadores_no_github(
             jogadores,
             f"Atualiza estatísticas - Jogador {id_selecionado}"
         )
 
-        st.success("Dados atualizados e commitados no GitHub")
+        st.success("Dados atualizados localmente e no GitHub")
 
-        # 🔁 FORÇA RECARREGAMENTO DA APLICAÇÃO
+        # 4️⃣ Atualiza a interface
         st.rerun()
 
 elif senha:
