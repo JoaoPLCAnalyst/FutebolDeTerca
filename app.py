@@ -9,8 +9,7 @@ from typing import Dict, Any
 # =========================
 st.set_page_config(page_title="Futebol de Terça", layout="wide")
 
-# Caminho local (fallback)
-JOGADORES_FILE = "database/jogadores.json"
+JOGADORES_FILE = "database/jogadores.json"  # fallback local
 
 # =========================
 # HELPERS
@@ -68,11 +67,13 @@ def normalize_jogadores(data: Any) -> Dict[str, dict]:
     return {}
 
 
-@st.cache_data(ttl=30)
-def carregar_jogadores_do_github() -> Dict[str, dict]:
+# =========================
+# LEITURA SEM CACHE (sempre executa)
+# =========================
+def carregar_jogadores_do_github_no_cache() -> Dict[str, dict]:
     """
-    Tenta buscar database/jogadores.json do GitHub (raw).
-    Se o repositório for privado e houver GITHUB_TOKEN em st.secrets, usa autenticação.
+    Busca database/jogadores.json do GitHub (raw) SEM usar cache.
+    Usa token se fornecido em st.secrets (útil para repositórios privados).
     Retorna dicionário normalizado ou {} em caso de falha.
     """
     user, repo, branch, token = _repo_parts_from_secrets()
@@ -87,24 +88,24 @@ def carregar_jogadores_do_github() -> Dict[str, dict]:
         headers["Authorization"] = f"token {token}"
 
     try:
-        r = requests.get(raw_url, headers=headers, timeout=8)
-        if r.status_code == 200:
-            try:
-                data = r.json()
-                return normalize_jogadores(data)
-            except Exception:
-                return {}
-        else:
-            # qualquer status diferente de 200 -> fallback vazio
-            return {}
+        r = requests.get(raw_url, headers=headers, timeout=10)
     except Exception:
         return {}
 
+    if r.status_code != 200:
+        return {}
 
-@st.cache_data(ttl=30)
-def carregar_jogadores_local() -> Dict[str, dict]:
+    try:
+        data = r.json()
+    except Exception:
+        return {}
+
+    return normalize_jogadores(data)
+
+
+def carregar_jogadores_local_no_cache() -> Dict[str, dict]:
     """
-    Lê o arquivo local JOGADORES_FILE e normaliza para dicionário.
+    Lê o arquivo local JOGADORES_FILE SEM usar cache e normaliza para dicionário.
     """
     if not os.path.exists(JOGADORES_FILE):
         return {}
@@ -118,24 +119,24 @@ def carregar_jogadores_local() -> Dict[str, dict]:
 
 def carregar_jogadores(prefer_github: bool = True) -> Dict[str, dict]:
     """
-    Tenta carregar do GitHub primeiro (se prefer_github=True).
+    Tenta carregar do GitHub primeiro (se prefer_github=True) sem cache.
     Se falhar, faz fallback para o arquivo local.
-    Retorna também a origem como string para debug/UX.
+    Define st.session_state['_jogadores_origem'] para UX/debug.
     """
     if prefer_github:
-        gh = carregar_jogadores_do_github()
+        gh = carregar_jogadores_do_github_no_cache()
         if gh:
             st.session_state["_jogadores_origem"] = "github"
             return gh
-        local = carregar_jogadores_local()
-        st.session_state["_jogadores_origem"] = "local"
+        local = carregar_jogadores_local_no_cache()
+        st.session_state["_jogadores_origem"] = "local" if local else "none"
         return local
     else:
-        local = carregar_jogadores_local()
+        local = carregar_jogadores_local_no_cache()
         if local:
             st.session_state["_jogadores_origem"] = "local"
             return local
-        gh = carregar_jogadores_do_github()
+        gh = carregar_jogadores_do_github_no_cache()
         st.session_state["_jogadores_origem"] = "github" if gh else "none"
         return gh
 
@@ -145,18 +146,38 @@ def carregar_jogadores(prefer_github: bool = True) -> Dict[str, dict]:
 # =========================
 st.title("⚽ Futebol de Terça")
 
-# Botão para forçar recarregar (limpa cache e rerun)
+# Botão para forçar recarregar (sem cache) — usa st.rerun()
 col_reload, _ = st.columns([1, 9])
 with col_reload:
     if st.button("🔄 Recarregar do GitHub"):
-        # limpa caches para forçar novo fetch
-        st.cache_data.clear()
-        st.rerun()
+        # Força recarregamento imediato chamando st.rerun() quando disponível.
+        # Se st.rerun não existir no ambiente, faz fallback seguro para st.experimental_rerun ou stop.
+        try:
+            # preferir st.rerun conforme solicitado
+            if hasattr(st, "rerun"):
+                st.rerun()
+            elif hasattr(st, "experimental_rerun"):
+                # fallback mínimo (não recomendado, mas seguro)
+                st.experimental_rerun()
+            else:
+                # último recurso: altera query params para forçar reload e para de executar
+                st.experimental_set_query_params(_reload="1")
+                st.stop()
+        except Exception:
+            # fallback seguro para evitar crash
+            try:
+                if hasattr(st, "experimental_rerun"):
+                    st.experimental_rerun()
+                else:
+                    st.experimental_set_query_params(_reload="1")
+                    st.stop()
+            except Exception:
+                st.stop()
 
-# Carrega jogadores (prefere GitHub)
+# Carrega jogadores SEM cache (sempre busca do GitHub quando preferido)
 jogadores = carregar_jogadores(prefer_github=True)
 
-# Indica origem dos dados (apenas para debug/UX)
+# Indica origem dos dados (UX)
 origem = st.session_state.get("_jogadores_origem", "desconhecida")
 if origem == "github":
     st.info("Fonte dos dados: GitHub (raw)")
