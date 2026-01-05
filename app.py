@@ -16,8 +16,12 @@ st.set_page_config(
 # =========================
 
 def carregar_jogadores():
+    """
+    Força a leitura do arquivo SEM cache interno.
+    Garante atualização após commits no GitHub.
+    """
     with open("jogadores.json", "r", encoding="utf-8") as f:
-        return json.load(f)
+        return json.loads(f.read())
 
 
 def conectar_github():
@@ -107,6 +111,9 @@ if senha == st.secrets["ADMIN_PASSWORD"]:
         )
 
         st.success("Dados atualizados e commitados no GitHub")
+
+        # 🔁 FORÇA RECARREGAMENTO DA APLICAÇÃO
         st.rerun()
+
 elif senha:
     st.error("Senha incorreta")
