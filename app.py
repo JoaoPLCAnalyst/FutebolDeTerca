@@ -107,6 +107,6 @@ if senha == st.secrets["ADMIN_PASSWORD"]:
         )
 
         st.success("Dados atualizados e commitados no GitHub")
-
+        st.rerun()
 elif senha:
     st.error("Senha incorreta")
