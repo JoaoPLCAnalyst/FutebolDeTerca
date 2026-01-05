@@ -1,150 +1,116 @@
 import streamlit as st
 import json
-import os
 import base64
 import requests
-import uuid
-from PIL import Image
+from datetime import datetime
 
-# ===========================
+st.set_page_config(page_title="Admin", page_icon="⚙️")
+
+# ===============================
 # CONFIGURAÇÕES
-# ===========================
-st.set_page_config(page_title="Admin - Futebol de Terça", layout="wide")
-
-PASSWORD = st.secrets["ADMIN_PASSWORD"]
-
-JOGADORES_FILE = "jogadores.json"
+# ===============================
+JOGADORES_FILE = "database/jogadores.json"
 IMAGENS_DIR = "imagens/jogadores"
 
-os.makedirs(IMAGENS_DIR, exist_ok=True)
+GITHUB_USER = st.secrets["GITHUB_USER"]
+GITHUB_REPO = st.secrets["GITHUB_REPO"]
+GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
+GITHUB_BRANCH = st.secrets.get("GITHUB_BRANCH", "main")
 
-# ===========================
-# FUNÇÕES AUXILIARES
-# ===========================
-def carregar_jogadores():
-    if not os.path.exists(JOGADORES_FILE):
-        return {}
-    with open(JOGADORES_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+HEADERS = {
+    "Authorization": f"token {GITHUB_TOKEN}",
+    "Accept": "application/vnd.github.v3+json"
+}
 
-def salvar_jogadores(jogadores):
-    with open(JOGADORES_FILE, "w", encoding="utf-8") as f:
-        json.dump(jogadores, f, indent=4, ensure_ascii=False)
+# ===============================
+# FUNÇÕES GITHUB
+# ===============================
 
-def github_upload(path_local, repo_path, message):
-    GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
-    GITHUB_REPO = st.secrets["GITHUB_REPO"]
-    GITHUB_USER = st.secrets["GITHUB_USER"]
+def github_get_file(path):
+    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}?ref={GITHUB_BRANCH}"
+    r = requests.get(url, headers=HEADERS)
+    if r.status_code == 200:
+        return r.json()
+    return None
 
-    headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"}
-    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{repo_path}"
 
-    with open(path_local, "rb") as f:
-        content_b64 = base64.b64encode(f.read()).decode()
-
-    get_file = requests.get(url, headers=headers)
-    sha = get_file.json().get("sha") if get_file.status_code == 200 else None
-
+def github_put_file(path, content_bytes, message, sha=None):
+    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}"
     payload = {
         "message": message,
-        "content": content_b64
+        "content": base64.b64encode(content_bytes).decode(),
+        "branch": GITHUB_BRANCH
     }
     if sha:
         payload["sha"] = sha
 
-    return requests.put(url, headers=headers, json=payload)
-
-# ===========================
-# LOGIN
-# ===========================
-if "auth" not in st.session_state:
-    st.session_state.auth = False
-
-if not st.session_state.auth:
-    st.title("🔐 Área Administrativa")
-    senha = st.text_input("Senha", type="password")
-
-    if st.button("Entrar"):
-        if senha == PASSWORD:
-            st.session_state.auth = True
-            st.rerun()
-        else:
-            st.error("Senha incorreta")
-    st.stop()
-
-# ===========================
-# CADASTRO DE JOGADOR
-# ===========================
-st.title("⚽ Cadastro de Jogadores")
-
-nome = st.text_input("Nome do jogador")
-foto = st.file_uploader("Foto do jogador", type=["png", "jpg", "jpeg"])
-
-if st.button("💾 Cadastrar jogador"):
-    if not nome or foto is None:
-        st.error("Preencha o nome e envie a foto.")
+    r = requests.put(url, headers=HEADERS, json=payload)
+    if r.status_code not in [200, 201]:
+        st.error(f"Erro GitHub ({path}): {r.json()}")
         st.stop()
 
-    jogadores = carregar_jogadores()
 
-    jogador_id = str(uuid.uuid4())[:8]
-    ext = foto.name.split(".")[-1].lower()
-    if ext == "jpeg":
-        ext = "jpg"
+# ===============================
+# INTERFACE
+# ===============================
 
-    img_filename = f"{jogador_id}.{ext}"
-    img_path = os.path.join(IMAGENS_DIR, img_filename)
+st.title("⚙️ Admin - Cadastro de Jogador")
 
-    image = Image.open(foto)
-    image.save(img_path)
+nome = st.text_input("Nome do jogador")
+posicao = st.text_input("Posição")
+imagem = st.file_uploader("Foto do jogador", type=["png", "jpg", "jpeg"])
 
-    jogadores[jogador_id] = {
-        "nome": nome,
-        "preco": 10,
-        "gols": 0,
-        "assistencias": 0,
-        "imagem": f"{IMAGENS_DIR}/{img_filename}"
-    }
+if st.button("Cadastrar jogador"):
 
-    salvar_jogadores(jogadores)
+    if not nome or not posicao or not imagem:
+        st.warning("Preencha todos os campos")
+        st.stop()
 
-    # Upload imagem
-    github_upload(
+    # ===============================
+    # 1️⃣ CARREGA JOGADORES.JSON
+    # ===============================
+    file_data = github_get_file(JOGADORES_FILE)
+
+    if file_data:
+        jogadores = json.loads(base64.b64decode(file_data["content"]))
+        sha_json = file_data["sha"]
+    else:
+        jogadores = []
+        sha_json = None
+
+    # ===============================
+    # 2️⃣ SALVA IMAGEM
+    # ===============================
+    ext = imagem.name.split(".")[-1]
+    img_filename = f"{nome.lower().replace(' ', '_')}.{ext}"
+    img_path = f"{IMAGENS_DIR}/{img_filename}"
+
+    github_put_file(
         img_path,
-        f"{IMAGENS_DIR}/{img_filename}",
+        imagem.getvalue(),
         f"Adiciona imagem do jogador {nome}"
     )
 
-    # Upload jogadores.json
-    github_upload(
+    # ===============================
+    # 3️⃣ ATUALIZA JSON
+    # ===============================
+    jogador = {
+        "nome": nome,
+        "posicao": posicao,
+        "imagem": img_path,
+        "criado_em": datetime.now().isoformat()
+    }
+
+    jogadores.append(jogador)
+
+    github_put_file(
         JOGADORES_FILE,
-        JOGADORES_FILE,
-        f"Adiciona jogador {nome}"
+        json.dumps(jogadores, indent=2).encode(),
+        f"Adiciona jogador {nome}",
+        sha=sha_json
     )
 
-    st.success("Jogador cadastrado e salvo no GitHub!")
-    st.rerun()
-
-# ===========================
-# LISTA DE JOGADORES
-# ===========================
-st.divider()
-st.subheader("📋 Jogadores cadastrados")
-
-jogadores = carregar_jogadores()
-
-if not jogadores:
-    st.info("Nenhum jogador cadastrado.")
-else:
-    for jid, j in jogadores.items():
-        with st.container(border=True):
-            cols = st.columns([1, 4])
-            with cols[0]:
-                if os.path.exists(j["imagem"]):
-                    st.image(j["imagem"], width=120)
-            with cols[1]:
-                st.markdown(f"**{j['nome']}**")
-                st.write(f"Gols: {j['gols']}")
-                st.write(f"Assistências: {j['assistencias']}")
-                st.write(f"Valor: {j['preco']}")
-                st.caption(f"ID: {jid}")
+    # ===============================
+    # 4️⃣ SUCESSO
+    # ===============================
+    st.success("✅ Jogador cadastrado e commitado no GitHub!")
