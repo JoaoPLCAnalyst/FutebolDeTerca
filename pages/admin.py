@@ -264,7 +264,7 @@ if st.button("Cadastrar jogador"):
 
     if success:
         st.success("✅ Jogador cadastrado e salvo no GitHub!")
-        st.experimental_rerun()
+        st.rerun()
 
 # =========================
 # LISTA DE JOGADORES (LEITURA COMO DICIONÁRIO)
