@@ -37,7 +37,6 @@ def imagem_github_url(caminho: str) -> str:
     if not user or not repo or not branch:
         return ""
     caminho = caminho.lstrip("/")
-    # adiciona timestamp para evitar cache CDN
     ts = int(time.time())
     return f"https://raw.githubusercontent.com/{user}/{repo}/{branch}/{caminho}?t={ts}"
 
@@ -58,7 +57,7 @@ def normalize_jogadores(data: Any) -> Dict[str, dict]:
     return {}
 
 # =========================
-# LEITURA DO GITHUB SEM CACHE (FORÇA FRESH)
+# LEITURA DO GITHUB SEM CACHE
 # =========================
 def carregar_jogadores_do_github_no_cache() -> Dict[str, dict]:
     user, repo, branch, token = _repo_parts_from_secrets()
@@ -67,7 +66,6 @@ def carregar_jogadores_do_github_no_cache() -> Dict[str, dict]:
     if not user or not repo or not branch:
         return {}
 
-    # adiciona timestamp para burlar caches CDN/HTTP
     ts = int(time.time())
     raw_url = f"https://raw.githubusercontent.com/{user}/{repo}/{branch}/{path}?t={ts}"
 
@@ -109,25 +107,17 @@ def carregar_jogadores_local_no_cache() -> Dict[str, dict]:
 # FUNÇÃO PRINCIPAL DE CARREGAMENTO
 # =========================
 def carregar_jogadores(prefer_github: bool = True) -> Dict[str, dict]:
-    """
-    Sempre tenta buscar do GitHub (sem cache). Se falhar, usa arquivo local.
-    Cada chamada faz uma nova requisição ao raw URL (timestamp incluso).
-    """
     if prefer_github:
         gh = carregar_jogadores_do_github_no_cache()
         if gh:
-            st.session_state["_jogadores_origem"] = "github"
             return gh
         local = carregar_jogadores_local_no_cache()
-        st.session_state["_jogadores_origem"] = "local" if local else "none"
         return local
     else:
         local = carregar_jogadores_local_no_cache()
         if local:
-            st.session_state["_jogadores_origem"] = "local"
             return local
         gh = carregar_jogadores_do_github_no_cache()
-        st.session_state["_jogadores_origem"] = "github" if gh else "none"
         return gh
 
 # =========================
@@ -135,39 +125,8 @@ def carregar_jogadores(prefer_github: bool = True) -> Dict[str, dict]:
 # =========================
 st.title("⚽ Futebol de Terça")
 
-# Botão para forçar recarregar (usa st.rerun())
-col_reload, _ = st.columns([1, 9])
-with col_reload:
-    if st.button("🔄 Recarregar do GitHub"):
-        # limpa possíveis caches do Streamlit (se existirem) e força rerun
-        try:
-            # tenta limpar cache de dados se disponível
-            if hasattr(st, "cache_data"):
-                try:
-                    st.cache_data.clear()
-                except Exception:
-                    pass
-            # usa st.rerun conforme solicitado
-            if hasattr(st, "rerun"):
-                st.rerun()
-            else:
-                # fallback seguro
-                st.experimental_rerun()
-        except Exception:
-            # fallback final: apenas para de executar e espera refresh manual
-            st.stop()
-
-# Carrega jogadores SEM cache (sempre faz nova requisição ao GitHub raw)
+# Sempre busca dados frescos do GitHub (sem cache)
 jogadores = carregar_jogadores(prefer_github=True)
-
-# Indica origem dos dados
-origem = st.session_state.get("_jogadores_origem", "desconhecida")
-if origem == "github":
-    st.info("Fonte dos dados: GitHub (raw) — versão mais recente")
-elif origem == "local":
-    st.info("Fonte dos dados: arquivo local")
-else:
-    st.info("Fonte dos dados: nenhuma (arquivo vazio ou erro)")
 
 if not jogadores:
     st.warning("Nenhum jogador cadastrado.")
@@ -178,6 +137,7 @@ sorted_items = sorted(jogadores.items(), key=lambda kv: (kv[1].get("nome") or ""
 
 for jogador_id, j in sorted_items:
     col1, col2 = st.columns([1, 3])
+
     imagem_path = j.get("imagem") or j.get("foto") or ""
     nome = j.get("nome", "—")
     gols = j.get("gols", 0)
