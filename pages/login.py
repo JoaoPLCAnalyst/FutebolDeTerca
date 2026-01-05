@@ -120,15 +120,15 @@ if st.button("Entrar"):
             if user_id == ADMIN_USER_ID:
                 if not (senha_valida_usuario or senha_admin_override):
                     st.error("Senha incorreta para o administrador.")
-                    continue
+                    st.stop()
             else:
                 # usuário comum: precisa ter senha configurada e válida
                 if not has_pw:
                     st.error("Conta sem senha configurada. Contate o administrador.")
-                    continue
+                    st.stop()
                 if not senha_valida_usuario:
                     st.error("Senha incorreta.")
-                    continue
+                    st.stop()
 
             # login OK
             now = datetime.utcnow().isoformat() + "Z"
