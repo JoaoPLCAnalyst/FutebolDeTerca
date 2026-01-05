@@ -19,5 +19,12 @@
     "gols": 0,
     "assistencias": 0,
     "imagem": "imagens/jogadores/teste-2d3d20fe.jpg"
+  },
+  "cha-db4afee1": {
+    "nome": "cha",
+    "valor": 10,
+    "gols": 0,
+    "assistencias": 0,
+    "imagem": "imagens/jogadores/cha-5932862b.jpg"
   }
 }
