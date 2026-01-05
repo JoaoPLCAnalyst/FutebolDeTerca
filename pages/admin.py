@@ -15,7 +15,7 @@ st.title("Área do Administrador")
 # =========================
 st.set_page_config(page_title="Admin - Futebol de Terça", page_icon="⚽")
 
-PASSWORD = st.secrets["ADMIN_PASSWORD"]
+PASSWORD = st.secrets["ADMIN_PASSWORD_EDITION"]
 
 JOGADORES_FILE = "database/jogadores.json"
 IMAGENS_DIR = "imagens/jogadores"
