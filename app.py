@@ -43,10 +43,8 @@ def imagem_github_url(caminho: str) -> str:
     if not caminho:
         return ""
     user, repo, branch = _repo_parts_from_secrets()
-    # Se algum dado estiver faltando, retorna string vazia para evitar URL inválida
     if not user or not repo or not branch:
         return ""
-    # Remove eventual barra inicial
     caminho = caminho.lstrip("/")
     return f"https://raw.githubusercontent.com/{user}/{repo}/{branch}/{caminho}"
 
@@ -64,7 +62,6 @@ def normalize_jogadores(data: Any) -> Dict[str, dict]:
         result = {}
         for idx, item in enumerate(data):
             key = item.get("id") or f"j{idx:04d}"
-            # evita sobrescrever se chave já existir
             if key in result:
                 key = f"{key}-{idx}"
             result[key] = item
@@ -85,7 +82,6 @@ def carregar_jogadores() -> Dict[str, dict]:
         with open(JOGADORES_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception:
-        # Em caso de erro de leitura/parse, retorna vazio para não quebrar a UI
         return {}
 
     return normalize_jogadores(data)
@@ -109,32 +105,29 @@ sorted_items = sorted(
 )
 
 for jogador_id, j in sorted_items:
-    # Layout: imagem à esquerda, detalhes à direita
     col1, col2 = st.columns([1, 3])
 
     # Suporta chaves antigas e novas:
-    # imagem pode estar em "imagem" ou "foto"
     imagem_path = j.get("imagem") or j.get("foto") or ""
     nome = j.get("nome", "—")
     gols = j.get("gols", 0)
     assistencias = j.get("assistencias", 0) or j.get("assistências", 0) or 0
-    # valor pode estar em "valor" ou "preco" ou "preço"
     valor = j.get("valor", j.get("preco", j.get("preço", "—")))
 
     with col1:
         if imagem_path:
             url = imagem_github_url(imagem_path)
             if url:
-                # st.image aceita URL; se houver problema, Streamlit mostra placeholder
                 st.image(url, width=120)
             else:
                 st.write("")  # espaço reservado
         else:
-            st.write("")  # espaço reservado quando não há imagem
+            st.write("")  # espaço reservado
 
     with col2:
         st.markdown(f"**{nome}**")
         st.write(f"Gols: **{gols}**")
         st.write(f"Assistências: **{assistencias}**")
         st.write(f"Valor: **{valor}**")
+        st.caption(f"ID: {jogador_id}")
         st.divider()
