@@ -11,11 +11,16 @@ from typing import Dict, Any, Optional
 st.set_page_config(page_title="Futebol de Terça", layout="wide")
 JOGADORES_FILE = "database/jogadores.json"  # fallback local
 GITHUB_COMMITS_ENDPOINT = "https://api.github.com/repos/{user}/{repo}/commits"
+AUTOREFRESH_INTERVAL_MS = 15_000  # intervalo de auto-refresh no navegador (ms)
 
 # =========================
 # HELPERS
 # =========================
 def _repo_parts_from_secrets():
+    """
+    Retorna (user, repo, branch, token) a partir de st.secrets.
+    Aceita GITHUB_REPO no formato "user/repo" ou GITHUB_USER + GITHUB_REPO separados.
+    """
     repo_full = st.secrets.get("GITHUB_REPO", "")
     user = st.secrets.get("GITHUB_USER", "")
     branch = st.secrets.get("GITHUB_BRANCH", "main")
@@ -32,6 +37,9 @@ def _repo_parts_from_secrets():
 
 
 def imagem_github_url(caminho: str) -> str:
+    """
+    Monta URL raw do GitHub para imagens, adicionando timestamp para burlar cache.
+    """
     if not caminho:
         return ""
     user, repo, branch, _ = _repo_parts_from_secrets()
@@ -43,6 +51,10 @@ def imagem_github_url(caminho: str) -> str:
 
 
 def normalize_jogadores(data: Any) -> Dict[str, dict]:
+    """
+    Garante que o retorno seja um dicionário no formato {id: jogador}.
+    Converte lista para dict quando necessário.
+    """
     if data is None:
         return {}
     if isinstance(data, dict):
@@ -63,7 +75,7 @@ def normalize_jogadores(data: Any) -> Dict[str, dict]:
 def get_latest_commit_sha_for_path(path: str) -> Optional[str]:
     """
     Retorna o SHA do commit mais recente que modificou `path` na branch configurada.
-    Usa a API /commits?path=...&sha=<branch>.
+    Usa a API /commits?path=...&sha=<branch>&per_page=1.
     Retorna None em caso de erro.
     """
     user, repo, branch, token = _repo_parts_from_secrets()
@@ -97,6 +109,10 @@ def get_latest_commit_sha_for_path(path: str) -> Optional[str]:
 # GITHUB: baixar JSON raw (sem cache)
 # =========================
 def fetch_jogadores_from_github_raw(path: str) -> Optional[Dict[str, dict]]:
+    """
+    Baixa o arquivo JSON raw do GitHub adicionando timestamp para evitar cache.
+    Retorna dict normalizado ou None em caso de falha.
+    """
     user, repo, branch, token = _repo_parts_from_secrets()
     if not user or not repo or not branch:
         return None
@@ -148,7 +164,6 @@ def carregar_jogadores_detect_commit(path: str = "database/jogadores.json") -> D
     salvo em st.session_state, baixa o JSON do GitHub (raw) e atualiza session_state.
     Se não conseguir usar GitHub, faz fallback para arquivo local.
     """
-    # inicializa session_state
     if "_jogadores_sha" not in st.session_state:
         st.session_state["_jogadores_sha"] = None
     if "_jogadores_data" not in st.session_state:
@@ -165,14 +180,13 @@ def carregar_jogadores_detect_commit(path: str = "database/jogadores.json") -> D
             return data
         # se falhar ao baixar, tentamos fallback local abaixo
 
-    # Se não conseguimos SHA (erro) ou SHA igual, usamos o que já temos em session_state
+    # Se já temos dados em session_state, retorna
     if st.session_state["_jogadores_data"]:
         return st.session_state["_jogadores_data"]
 
-    # Se não há dados em session_state, tentamos baixar do GitHub mesmo sem SHA
+    # Se não há dados em session_state, tenta baixar do GitHub mesmo sem SHA
     data = fetch_jogadores_from_github_raw(path)
     if data is not None:
-        # tentamos obter sha também para sincronizar
         if latest_sha:
             st.session_state["_jogadores_sha"] = latest_sha
         st.session_state["_jogadores_data"] = data
@@ -184,9 +198,38 @@ def carregar_jogadores_detect_commit(path: str = "database/jogadores.json") -> D
     return local
 
 # =========================
+# AUTOREFRESH (usa streamlit-autorefresh se disponível, fallback JS)
+# =========================
+def ensure_autorefresh(interval_ms: int):
+    """
+    Força o navegador a recarregar periodicamente para disparar nova execução do script.
+    Usa streamlit-autorefresh quando disponível; caso contrário injeta um pequeno JS.
+    """
+    try:
+        from streamlit_autorefresh import st_autorefresh
+        st_autorefresh(interval=interval_ms, limit=None, key="autorefresh")
+        return
+    except Exception:
+        seconds = max(1, int(interval_ms / 1000))
+        refresh_html = f"""
+        <script>
+            if (!window._streamlit_autorefresh_installed) {{
+                window._streamlit_autorefresh_installed = true;
+                setInterval(function() {{
+                    window.location.reload();
+                }}, {seconds * 1000});
+            }}
+        </script>
+        """
+        st.components.v1.html(refresh_html, height=0)
+
+# =========================
 # INTERFACE
 # =========================
 st.title("⚽ Futebol de Terça")
+
+# ativa auto-refresh no cliente (navegador)
+ensure_autorefresh(AUTOREFRESH_INTERVAL_MS)
 
 # Carrega jogadores detectando commits e atualizando automaticamente
 jogadores = carregar_jogadores_detect_commit("database/jogadores.json")
