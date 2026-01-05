@@ -1,7 +1,6 @@
 import streamlit as st
 import os
 import json
-import re
 from datetime import datetime
 import time
 
@@ -103,54 +102,56 @@ if st.button("Entrar"):
 
     if not email or not senha:
         st.error("Preencha e‑mail e senha.")
+        st.stop()
+
+    user_id, perfil = encontrar_userid_por_email(email)
+
+    if not user_id:
+        st.error("E‑mail não encontrado nos perfis. Login negado.")
+        st.stop()
+
+    # Verifica override de senha admin (se configurado em secrets)
+    senha_admin_override = (ADMIN_PASSWORD is not None and senha == ADMIN_PASSWORD and user_id == ADMIN_USER_ID)
+
+    # Verifica se existe senha configurada para o user_id
+    has_pw = user_id in st.secrets.get("USERS_PASSWORDS", {})
+    senha_valida_usuario = has_pw and check_password_for_userid_plain(user_id, senha)
+
+    # Se for admin, só aceita se user_id for o admin e senha for a do admin ou a senha do usuário admin em USERS_PASSWORDS
+    if user_id == ADMIN_USER_ID:
+        if not (senha_valida_usuario or senha_admin_override):
+            st.error("Senha incorreta para o administrador.")
+            st.stop()
     else:
-        user_id, perfil = encontrar_userid_por_email(email)
+        # usuário comum: precisa ter senha configurada e válida
+        if not has_pw:
+            st.error("Conta sem senha configurada. Contate o administrador.")
+            st.stop()
+        if not senha_valida_usuario:
+            st.error("Senha incorreta.")
+            st.stop()
 
-        if not user_id:
-            st.error("E‑mail não encontrado nos perfis. Login negado.")
-        else:
-            # Verifica override de senha admin (se configurado em secrets)
-            senha_admin_override = (ADMIN_PASSWORD is not None and senha == ADMIN_PASSWORD and user_id == ADMIN_USER_ID)
+    # login OK
+    now = datetime.utcnow().isoformat() + "Z"
+    perfil = perfil or {}
+    perfil["user_id"] = user_id
+    perfil["ultimo_login"] = now
+    saved = salvar_perfil(user_id, perfil)
+    if not saved:
+        st.warning("Login efetuado, mas não foi possível atualizar último_login no arquivo de perfil.")
 
-            # Verifica se existe senha configurada para o user_id
-            has_pw = user_id in st.secrets.get("USERS_PASSWORDS", {})
-            senha_valida_usuario = has_pw and check_password_for_userid_plain(user_id, senha)
+    # sinaliza sessão
+    st.session_state["user_id"] = user_id
+    st.session_state["perfil"] = perfil
+    st.session_state["logged_in"] = True
+    st.session_state["login_time"] = time.time()
 
-            # Se for admin, só aceita se user_id for o admin e senha for a do admin ou a senha do usuário admin em USERS_PASSWORDS
-            if user_id == ADMIN_USER_ID:
-                if not (senha_valida_usuario or senha_admin_override):
-                    st.error("Senha incorreta para o administrador.")
-                    st.stop()
-            else:
-                # usuário comum: precisa ter senha configurada e válida
-                if not has_pw:
-                    st.error("Conta sem senha configurada. Contate o administrador.")
-                    st.stop()
-                if not senha_valida_usuario:
-                    st.error("Senha incorreta.")
-                    st.stop()
+    # define is_admin se for o user_id admin e a senha for válida (ou override)
+    st.session_state["is_admin"] = (user_id == ADMIN_USER_ID and (senha_valida_usuario or senha_admin_override))
 
-            # login OK
-            now = datetime.utcnow().isoformat() + "Z"
-            perfil = perfil or {}
-            perfil["user_id"] = user_id
-            perfil["ultimo_login"] = now
-            saved = salvar_perfil(user_id, perfil)
-            if not saved:
-                st.warning("Login efetuado, mas não foi possível atualizar último_login no arquivo de perfil.")
+    # mensagem de sucesso persistente por uma execução
+    st.session_state["login_message"] = f"Bem vindo, {perfil.get('nome_apresentacao', user_id)}!"
 
-            # sinaliza sessão
-            st.session_state["user_id"] = user_id
-            st.session_state["perfil"] = perfil
-            st.session_state["logged_in"] = True
-            st.session_state["login_time"] = time.time()
-
-            # define is_admin se for o user_id admin e a senha for válida (ou override)
-            st.session_state["is_admin"] = (user_id == ADMIN_USER_ID and (senha_valida_usuario or senha_admin_override))
-
-            # mensagem de sucesso persistente por uma execução
-            st.session_state["login_message"] = f"Bem vindo, {perfil.get('nome_apresentacao', user_id)}!"
-
-            # mostra confirmação imediata e reinicia para propagar session_state
-            st.success(st.session_state["login_message"])
-            st.rerun()
+    # mostra confirmação imediata e reinicia para propagar session_state
+    st.success(st.session_state["login_message"])
+    st.rerun()
