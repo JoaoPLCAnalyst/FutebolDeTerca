@@ -1,0 +1,48 @@
+{
+  "rodada_id": "2026-01-06-rodada-03",
+  "timestamp_closed": "2026-01-06T22:30:04.891963+00:00",
+  "matches": [
+    "2026-01-06-match-01",
+    "2026-01-06-match-02"
+  ],
+  "placar_por_partida": {
+    "2026-01-06-match-01": {
+      "team1": 5,
+      "team2": 2
+    },
+    "2026-01-06-match-02": {
+      "team1": 2,
+      "team2": 2
+    }
+  },
+  "resumo_por_jogador": {
+    "joao-5c0f835c": {
+      "gols": 2,
+      "assistencias": 0,
+      "vitorias": 1
+    },
+    "izadora-b7eaaa2b": {
+      "gols": 5,
+      "assistencias": 0,
+      "vitorias": 1
+    },
+    "eudes-4655e992": {
+      "gols": 4,
+      "assistencias": 0,
+      "vitorias": 0
+    }
+  },
+  "meta_snapshot": {
+    "id": "2026-01-06-rodada-03",
+    "nome": "teste2",
+    "admin": "admin",
+    "inicio": "2026-01-06T22:28:12.716301+00:00",
+    "fim": null,
+    "status": "open",
+    "matches": [
+      "2026-01-06-match-01",
+      "2026-01-06-match-02"
+    ],
+    "match_count": 2
+  }
+}
