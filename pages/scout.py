@@ -126,7 +126,6 @@ def undo_last_event():
     assister = last.get("assister")
     # reverter alterações
     if ev_type == "gol" and scorer:
-        # decrementar gols do jogador e placar do time
         if jogadores.get(scorer):
             jogadores[scorer]["gols"] = max(0, jogadores[scorer].get("gols", 0) - 1)
         if team == "team1":
@@ -139,6 +138,55 @@ def undo_last_event():
     salvar_jogadores(jogadores)
     st.success("Último evento desfeito.")
     st.rerun()
+
+# ------------------------
+# Função única para renderizar bloco de jogador (evita duplicação)
+# ------------------------
+def render_player_block(pid, p, team_num):
+    """
+    Renderiza um bloco de jogador com botões únicos.
+    team_num: 1 (Time1), 2 (Time2)
+    """
+    nome = p.get("nome", pid)
+    gols = p.get("gols", 0)
+    asts = p.get("assistencias", 0)
+
+    st.markdown(f"**{nome}**")
+    st.caption(f"Gols: {gols} | Assistências: {asts}")
+
+    cols = st.columns([1,1,1,1])
+    # + Gol
+    if cols[0].button("+ Gol", key=f"+gol-{team_num}-{pid}"):
+        record_event("gol", team_num, scorer_pid=pid, assister_pid=None, delta_scorer=1, delta_assister=0)
+        st.rerun()
+    # - Gol
+    if cols[1].button("- Gol", key=f"-gol-{team_num}-{pid}"):
+        if gols > 0:
+            record_event("gol", team_num, scorer_pid=pid, assister_pid=None, delta_scorer=-1, delta_assister=0)
+            st.rerun()
+    # + Assist
+    if cols[2].button("+ Assist", key=f"+ast-{team_num}-{pid}"):
+        record_event("assist", team_num, scorer_pid=None, assister_pid=pid, delta_scorer=0, delta_assister=1)
+        st.rerun()
+    # - Assist
+    if cols[3].button("- Assist", key=f"-ast-{team_num}-{pid}"):
+        if asts > 0:
+            record_event("assist", team_num, scorer_pid=None, assister_pid=pid, delta_scorer=0, delta_assister=-1)
+            st.rerun()
+
+    # botões rápidos abaixo para mover entre times / remover
+    b1, b2, b3 = st.columns([1,1,1])
+    if team_num == 1:
+        if b1.button("→ Time 2", key=f"move-to2-{pid}"):
+            assign_player(pid, 2)
+    else:
+        if b1.button("→ Time 1", key=f"move-to1-{pid}"):
+            assign_player(pid, 1)
+    if b2.button("Remover (Nenhum)", key=f"move-none-{team_num}-{pid}"):
+        assign_player(pid, 0)
+    # botão para ver detalhes (opcional)
+    if b3.button("Detalhes", key=f"det-{team_num}-{pid}"):
+        st.write(f"ID: {pid}")
 
 # ------------------------
 # Layout: três colunas (Time1 | Centro | Time2)
@@ -176,6 +224,7 @@ with center_col:
     if not available:
         st.write("Nenhum jogador disponível")
     else:
+        # exibe em 3 colunas com botões rápidos para atribuir
         cols = st.columns(3)
         for i, (pid, nome) in enumerate(available):
             col = cols[i % 3]
@@ -196,37 +245,8 @@ with left_col:
         st.write("Nenhum jogador atribuído ao Time 1")
     else:
         for pid, p in team1:
-            nome = p.get("nome", pid)
-            cols = st.columns([3,1,1,1,1])
-            with cols[0]:
-                st.markdown(f"**{nome}**")
-                st.caption(f"Gols: {p.get('gols',0)} | Assistências: {p.get('assistencias',0)}")
-            with cols[1]:
-                if st.button("+ Gol", key=f"+gol-{pid}"):
-                    record_event("gol", 1, scorer_pid=pid, assister_pid=None, delta_scorer=1, delta_assister=0)
-                    st.rerun()
-            with cols[2]:
-                if st.button("- Gol", key=f"-gol-{pid}"):
-                    if p.get("gols",0) > 0:
-                        record_event("gol", 1, scorer_pid=pid, assister_pid=None, delta_scorer=-1, delta_assister=0)
-                        st.rerun()
-            with cols[3]:
-                if st.button("+ Assist", key=f"+ast-{pid}"):
-                    record_event("assist", 1, scorer_pid=None, assister_pid=pid, delta_scorer=0, delta_assister=1)
-                    st.rerun()
-            with cols[4]:
-                if st.button("- Assist", key=f"-ast-{pid}"):
-                    if p.get("assistencias",0) > 0:
-                        record_event("assist", 1, scorer_pid=None, assister_pid=pid, delta_scorer=0, delta_assister=-1)
-                        st.rerun()
-            # Botões rápidos abaixo do jogador para mover entre times
-            b1, b2 = st.columns([1,1])
-            with b1:
-                if st.button("→ Time 2", key=f"move-to2-{pid}"):
-                    assign_player(pid, 2)
-            with b2:
-                if st.button("Remover (Nenhum)", key=f"move-none-{pid}"):
-                    assign_player(pid, 0)
+            render_player_block(pid, p, team_num=1)
+            st.markdown("---")
 
 # --- Right: Time 2 ---
 with right_col:
@@ -238,37 +258,8 @@ with right_col:
         st.write("Nenhum jogador atribuído ao Time 2")
     else:
         for pid, p in team2:
-            nome = p.get("nome", pid)
-            cols = st.columns([3,1,1,1,1])
-            with cols[0]:
-                st.markdown(f"**{nome}**")
-                st.caption(f"Gols: {p.get('gols',0)} | Assistências: {p.get('assistencias',0)}")
-            with cols[1]:
-                if st.button("+ Gol", key=f"+gol2-{pid}"):
-                    record_event("gol", 2, scorer_pid=pid, assister_pid=None, delta_scorer=1, delta_assister=0)
-                    st.rerun()
-            with cols[2]:
-                if st.button("- Gol", key=f"-gol2-{pid}"):
-                    if p.get("gols",0) > 0:
-                        record_event("gol", 2, scorer_pid=pid, assister_pid=None, delta_scorer=-1, delta_assister=0)
-                        st.rerun()
-            with cols[3]:
-                if st.button("+ Assist", key=f"+ast2-{pid}"):
-                    record_event("assist", 2, scorer_pid=None, assister_pid=pid, delta_scorer=0, delta_assister=1)
-                    st.rerun()
-            with cols[4]:
-                if st.button("- Assist", key=f"-ast2-{pid}"):
-                    if p.get("assistencias",0) > 0:
-                        record_event("assist", 2, scorer_pid=None, assister_pid=pid, delta_scorer=0, delta_assister=-1)
-                        st.rerun()
-            # Botões rápidos abaixo do jogador para mover entre times
-            b1, b2 = st.columns([1,1])
-            with b1:
-                if st.button("→ Time 1", key=f"move-to1-{pid}"):
-                    assign_player(pid, 1)
-            with b2:
-                if st.button("Remover (Nenhum)", key=f"move-none2-{pid}"):
-                    assign_player(pid, 0)
+            render_player_block(pid, p, team_num=2)
+            st.markdown("---")
 
 # ------------------------
 # Painel de atribuição (abaixo): permite atribuir jogadores a times rapidamente (opcional)
