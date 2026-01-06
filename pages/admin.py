@@ -195,43 +195,24 @@ def _write_atomic(path, data_bytes):
         os.fsync(f.fileno())
     os.replace(tmp, path)
 
-def next_rodada_id_for_date(base_dir, date_str, prefix="rodada", pad=2):
-    """
-    Gera um id do tipo YYYY-MM-DD-rodada-XX garantindo unicidade por tentativa.
-    """
+def next_rodada_id_for_date(base_dir, date_str, prefix="rodada", pad=2, max_attempts=1000):
     os.makedirs(base_dir, exist_ok=True)
-    existing = [n for n in os.listdir(base_dir) if n.startswith(f"{date_str}-{prefix}-")]
-    start = len(existing) + 1
-    for n in range(start, start + 1000):
+    for n in range(1, max_attempts + 1):
         seq = str(n).zfill(pad)
         rodada_id = f"{date_str}-{prefix}-{seq}"
         path = os.path.join(base_dir, rodada_id)
-        # tenta criar a pasta de forma exclusiva
         try:
-            os.makedirs(path)
-            # removemos a pasta criada para que a função chamadora crie a estrutura completa
-            os.rmdir(path)
+            # tentativa atômica de criar a pasta; falha se já existir
+            os.mkdir(path)
+            # pasta criada com sucesso; devolve id
             return rodada_id
         except FileExistsError:
             continue
-        except Exception:
-            # se não conseguir criar, continua tentando
-            continue
-    raise RuntimeError("Não foi possível gerar rodada_id único")
+    raise RuntimeError("Não foi possível gerar rodada_id único após muitas tentativas")
 
 def create_rodada(base_dir, nome, admin_user=None, github_upload_enabled=False):
-    """
-    Cria a estrutura:
-      database/rodadas/<rodada_id>/meta.json
-      database/rodadas/<rodada_id>/matches/  (diretório)
-    Retorna (ok, rodada_id, mensagem)
-    """
     date_str = datetime.now().strftime("%Y-%m-%d")
-    try:
-        rodada_id = next_rodada_id_for_date(base_dir, date_str)
-    except Exception as e:
-        return False, None, f"Erro ao gerar id da rodada: {e}"
-
+    rodada_id = next_rodada_id_for_date(base_dir, date_str)
     rodada_dir = os.path.join(base_dir, rodada_id)
     matches_dir = os.path.join(rodada_dir, "matches")
     os.makedirs(matches_dir, exist_ok=True)
@@ -243,7 +224,8 @@ def create_rodada(base_dir, nome, admin_user=None, github_upload_enabled=False):
         "inicio": datetime.now(timezone.utc).isoformat(),
         "fim": None,
         "status": "open",
-        "matches": []
+        "matches": [],
+        "match_count": 0
     }
 
     meta_path = os.path.join(rodada_dir, "meta.json")
@@ -252,14 +234,13 @@ def create_rodada(base_dir, nome, admin_user=None, github_upload_enabled=False):
     except Exception as e:
         return False, None, f"Falha ao gravar meta.json: {e}"
 
-    # opcional: upload para GitHub
+    # opcional: upload para GitHub (mantém comportamento anterior)
     if github_upload_enabled and GITHUB_USER and GITHUB_REPO and GITHUB_TOKEN:
         try:
-            ok, out = github_upload(meta_path, f"database/rodadas/{rodada_id}/meta.json", f"Cria rodada {rodada_id}")
-            if not ok:
-                return True, rodada_id, f"Rodada criada localmente, mas falha ao enviar para GitHub: {out}"
-        except Exception as e:
-            return True, rodada_id, f"Rodada criada localmente, mas erro no upload GitHub: {e}"
+            ok = github_upload(meta_path, f"database/rodadas/{rodada_id}/meta.json", f"Cria rodada {rodada_id}")
+            # github_upload retorna None ou response; não trate como bloqueante aqui
+        except Exception:
+            pass
 
     return True, rodada_id, "Rodada criada com sucesso"
 
@@ -270,14 +251,21 @@ rodada_nome = st.text_input("Nome da rodada (opcional)", value="")
 admin_user = st.session_state.get("user_id") or st.session_state.get("perfil") or "admin"
 github_enabled = bool(GITHUB_USER and GITHUB_REPO and GITHUB_TOKEN)
 
-if st.button("Iniciar rodada"):
-    ok, rodada_id, msg = create_rodada(os.path.join("database", "rodadas"), rodada_nome, admin_user=admin_user, github_upload_enabled=github_enabled)
-    if ok:
-        st.success(f"Rodada iniciada: **{rodada_id}**")
-        st.info(msg)
-    else:
-        st.error(msg)
-    st.rerun()
+if "creating_rodada" not in st.session_state:
+    st.session_state.creating_rodada = False
+
+if st.button("Iniciar rodada", disabled=st.session_state.creating_rodada):
+    st.session_state.creating_rodada = True
+    try:
+        ok, rodada_id, msg = create_rodada(os.path.join("database", "rodadas"), rodada_nome, admin_user=admin_user, github_upload_enabled=github_enabled)
+        if ok:
+            st.success(f"Rodada iniciada: **{rodada_id}**")
+            st.info(msg)
+        else:
+            st.error(msg)
+    finally:
+        st.session_state.creating_rodada = False
+        st.rerun()
 
 # Lista rápida de rodadas abertas (informativa)
 st.markdown("Rodadas abertas")
@@ -441,7 +429,7 @@ def fechar_rodada(rodada_id, fazer_backup_jogadores=True, github_upload_enabled=
         return False, f"Falha ao atualizar jogadores.json: {e}"
 
     # atualiza meta.json com fim e status closed e match_count
-        # atualiza meta.json somente após sucesso completo, com verificação
+    # atualiza meta.json somente após sucesso completo, com verificação
     try:
         meta["fim"] = datetime.now(timezone.utc).isoformat()
         meta["status"] = "closed"
@@ -460,7 +448,6 @@ def fechar_rodada(rodada_id, fazer_backup_jogadores=True, github_upload_enabled=
                     break
             except Exception:
                 pass
-            # pequena espera antes de tentar de novo
             import time as _time
             _time.sleep(0.1)
 
@@ -469,7 +456,6 @@ def fechar_rodada(rodada_id, fazer_backup_jogadores=True, github_upload_enabled=
             try:
                 _write_atomic(meta_path, json.dumps(meta, ensure_ascii=False, indent=2).encode("utf-8"))
             except Exception as e:
-                # registra erro e retorna
                 meta["status"] = "error"
                 meta["error_message"] = f"Falha ao gravar meta.json: {e}"
                 try:
@@ -487,7 +473,6 @@ def fechar_rodada(rodada_id, fazer_backup_jogadores=True, github_upload_enabled=
                 return False, f"Gravado meta.json, mas não foi possível ler para verificação: {e}"
 
     except Exception as e:
-        # registra erro e marca meta como error para investigação
         try:
             meta["status"] = "error"
             meta["error_message"] = str(e)
@@ -532,13 +517,21 @@ if not open_rodadas:
 else:
     rodada_to_close = st.selectbox("Selecionar rodada para fechar", options=open_rodadas)
     github_enabled = bool(GITHUB_USER and GITHUB_REPO and GITHUB_TOKEN)
-    if st.button("Fechar rodada selecionada"):
+    if "closing_rodada" not in st.session_state:
+        st.session_state.closing_rodada = False
+
+    if st.button("Fechar rodada selecionada", disabled=st.session_state.closing_rodada):
+        st.session_state.closing_rodada = True
+    try:
         ok, msg = fechar_rodada(rodada_to_close, fazer_backup_jogadores=True, github_upload_enabled=github_enabled)
         if ok:
             st.success(msg)
         else:
             st.error(msg)
+    finally:
+        st.session_state.closing_rodada = False
         st.rerun()
+
 # --- Bloco de diagnóstico temporário (cole para depurar) ---
 st.markdown("---")
 st.subheader("🔎 Diagnóstico rápido de fechamento")
