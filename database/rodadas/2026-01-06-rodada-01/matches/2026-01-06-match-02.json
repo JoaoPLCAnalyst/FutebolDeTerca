@@ -1,0 +1,18 @@
+{
+  "rodada_id": "2026-01-06-rodada-01",
+  "timestamp_start": null,
+  "timestamp_end": "2026-01-06T20:57:09.424979+00:00",
+  "duration_seconds": 0,
+  "team_assign": {
+    "joao-5c0f835c": 0,
+    "eudes-4655e992": 0
+  },
+  "score": {
+    "team1": 0,
+    "team2": 0
+  },
+  "events": [],
+  "resumo_jogadores": {},
+  "id": "2026-01-06-match-02",
+  "timestamp_utc": "2026-01-06T20:57:09.426537+00:00"
+}
