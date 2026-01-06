@@ -5,7 +5,12 @@ import re
 import uuid
 import io
 from PIL import Image
-import base64, requests
+import base64
+import requests
+import tempfile
+import shutil
+import glob
+from datetime import datetime, timezone
 
 # =========================
 # CONFIGURAÇÃO DA PÁGINA
@@ -28,19 +33,26 @@ GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
 GITHUB_BRANCH = st.secrets.get("GITHUB_BRANCH", "main")
 
 def github_upload(path_local, repo_path, message):
-    """Envia arquivo local ao GitHub (opcional)."""
+    """Envia arquivo local ao GitHub (opcional). Retorna (ok, msg)."""
     if not GITHUB_USER or not GITHUB_REPO or not GITHUB_TOKEN:
-        return None
-    headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"}
-    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{repo_path}"
-    with open(path_local, "rb") as f:
-        content_b64 = base64.b64encode(f.read()).decode()
-    get_file = requests.get(url, headers=headers)
-    sha = get_file.json().get("sha") if get_file.status_code == 200 else None
-    payload = {"message": message, "content": content_b64}
-    if sha:
-        payload["sha"] = sha
-    return requests.put(url, headers=headers, json=payload)
+        return False, "GitHub não configurado"
+    try:
+        headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"}
+        url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{repo_path}"
+        with open(path_local, "rb") as f:
+            content_b64 = base64.b64encode(f.read()).decode()
+        get_file = requests.get(url, headers=headers, params={"ref": GITHUB_BRANCH})
+        sha = get_file.json().get("sha") if get_file.status_code == 200 else None
+        payload = {"message": message, "content": content_b64, "branch": GITHUB_BRANCH}
+        if sha:
+            payload["sha"] = sha
+        resp = requests.put(url, headers=headers, json=payload)
+        if resp.status_code in (200, 201):
+            return True, f"ok ({resp.status_code})"
+        else:
+            return False, f"erro ({resp.status_code}): {resp.text}"
+    except Exception as e:
+        return False, f"erro: {e}"
 
 # =========================
 # UTILITÁRIOS
@@ -71,12 +83,26 @@ def salvar_jogadores(jogadores_dict):
     with open(JOGADORES_FILE, "w", encoding="utf-8") as f:
         json.dump(jogadores_dict, f, indent=2, ensure_ascii=False)
 
+def _write_atomic(path, data_bytes):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))
+    os.close(fd)
+    with open(tmp, "wb") as f:
+        f.write(data_bytes)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+def _load_json(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
 # =========================
 # REQUISITO: estar logado como admin (global)
 # =========================
-# A página só será exibida se a flag global de admin estiver presente.
-# Se você usa outra página de login que define st.session_state["is_admin"] = True,
-# o acesso será liberado. Caso contrário, a execução é interrompida.
 if not st.session_state.get("is_admin"):
     st.title("🔐 Área Administrativa")
     st.warning("Acesso restrito: faça login com o usuário administrador na página de login para acessar esta área.")
@@ -100,22 +126,18 @@ if not st.session_state.auth:
     st.stop()
 
 # =========================
-# INTERFACE
+# INTERFACE - Cadastro de jogadores
 # =========================
 st.title("⚽ Cadastro de Jogadores")
 
 nome = st.text_input("Nome do jogador")
 imagem = st.file_uploader("Imagem do jogador (PNG/JPG)", type=["png", "jpg", "jpeg"])
 
-# =========================
-# CADASTRAR JOGADOR
-# =========================
 if st.button("Cadastrar jogador"):
     if not nome or imagem is None:
         st.error("Preencha o nome e envie uma imagem")
         st.stop()
 
-    # Processar imagem
     ext = imagem.name.split(".")[-1].lower()
     if ext == "jpeg":
         ext = "jpg"
@@ -128,7 +150,6 @@ if st.button("Cadastrar jogador"):
     with open(img_path, "wb") as f:
         f.write(processed_bytes)
 
-    # Atualizar jogadores.json
     jogadores_dict = carregar_jogadores()
     player_id = f"{slugify(nome)}-{uuid.uuid4().hex[:8]}"
     novo_jogador = {
@@ -141,7 +162,6 @@ if st.button("Cadastrar jogador"):
     jogadores_dict[player_id] = novo_jogador
     salvar_jogadores(jogadores_dict)
 
-    # Upload opcional ao GitHub
     github_upload(img_path, f"{IMAGENS_DIR}/{img_filename}", f"Adiciona imagem do jogador {nome}")
     github_upload(JOGADORES_FILE, JOGADORES_FILE, f"Atualiza jogadores.json com {nome}")
 
@@ -179,22 +199,10 @@ else:
                 github_upload(JOGADORES_FILE, JOGADORES_FILE, f"Remove jogador {j['nome']}")
                 st.success(f"Jogador {j['nome']} excluído!")
                 st.rerun()
+
 # ------------------------
 # Iniciar rodada (Admin)
 # ------------------------
-import tempfile
-from datetime import datetime, timezone
-
-def _write_atomic(path, data_bytes):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))
-    os.close(fd)
-    with open(tmp, "wb") as f:
-        f.write(data_bytes)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, path)
-
 def next_rodada_id_for_date(base_dir, date_str, prefix="rodada", pad=2, max_attempts=1000):
     os.makedirs(base_dir, exist_ok=True)
     for n in range(1, max_attempts + 1):
@@ -234,11 +242,10 @@ def create_rodada(base_dir, nome, admin_user=None, github_upload_enabled=False):
     except Exception as e:
         return False, None, f"Falha ao gravar meta.json: {e}"
 
-    # opcional: upload para GitHub (mantém comportamento anterior)
+    # opcional: upload para GitHub (não bloqueante)
     if github_upload_enabled and GITHUB_USER and GITHUB_REPO and GITHUB_TOKEN:
         try:
-            ok = github_upload(meta_path, f"database/rodadas/{rodada_id}/meta.json", f"Cria rodada {rodada_id}")
-            # github_upload retorna None ou response; não trate como bloqueante aqui
+            github_upload(meta_path, f"database/rodadas/{rodada_id}/meta.json", f"Cria rodada {rodada_id}")
         except Exception:
             pass
 
@@ -261,6 +268,14 @@ if st.button("Iniciar rodada", disabled=st.session_state.creating_rodada):
         if ok:
             st.success(f"Rodada iniciada: **{rodada_id}**")
             st.info(msg)
+            # verificação rápida pós-criação
+            meta_path = os.path.join("database", "rodadas", rodada_id, "meta.json")
+            try:
+                meta_check = _load_json(meta_path)
+                if meta_check and meta_check.get("matches"):
+                    st.warning("Atenção: meta.matches não está vazio após criação (investigar).")
+            except Exception:
+                pass
         else:
             st.error(msg)
     finally:
@@ -289,31 +304,10 @@ if os.path.exists(rodadas_base):
             st.write(f"- **{r[0]}** — {r[1]} — início: {r[2]} — partidas: {r[3]}")
 else:
     st.write("Nenhuma rodada encontrada")
+
 # ------------------------
 # Fechar rodada (Admin)
 # ------------------------
-import shutil
-import glob
-import tempfile
-from datetime import datetime, timezone
-
-def _write_atomic(path, data_bytes):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))
-    os.close(fd)
-    with open(tmp, "wb") as f:
-        f.write(data_bytes)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, path)
-
-def _load_json(path):
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
-
 def fechar_rodada(rodada_id, fazer_backup_jogadores=True, github_upload_enabled=False):
     base = os.path.join("database", "rodadas", rodada_id)
     meta_path = os.path.join(base, "meta.json")
@@ -425,10 +419,8 @@ def fechar_rodada(rodada_id, fazer_backup_jogadores=True, github_upload_enabled=
         # grava atômico jogadores.json
         _write_atomic(JOGADORES_FILE, json.dumps(jogadores_on_disk, ensure_ascii=False, indent=2).encode("utf-8"))
     except Exception as e:
-        # opcional: remover summary.json ou marcar meta como error
         return False, f"Falha ao atualizar jogadores.json: {e}"
 
-    # atualiza meta.json com fim e status closed e match_count
     # atualiza meta.json somente após sucesso completo, com verificação
     try:
         meta["fim"] = datetime.now(timezone.utc).isoformat()
@@ -487,7 +479,6 @@ def fechar_rodada(rodada_id, fazer_backup_jogadores=True, github_upload_enabled=
             ok1, out1 = github_upload(summary_path, f"database/rodadas/{rodada_id}/summary.json", f"Adiciona summary da rodada {rodada_id}")
             ok2, out2 = github_upload(meta_path, f"database/rodadas/{rodada_id}/meta.json", f"Fecha rodada {rodada_id}")
             ok3, out3 = github_upload(JOGADORES_FILE, JOGADORES_FILE, f"Atualiza jogadores após fechamento de {rodada_id}")
-            # warnings se algum upload falhar
             if not ok1 or not ok2 or not ok3:
                 return True, f"Rodada fechada localmente; upload parcial: {out1}; {out2}; {out3}"
         except Exception as e:
@@ -517,20 +508,21 @@ if not open_rodadas:
 else:
     rodada_to_close = st.selectbox("Selecionar rodada para fechar", options=open_rodadas)
     github_enabled = bool(GITHUB_USER and GITHUB_REPO and GITHUB_TOKEN)
+
     if "closing_rodada" not in st.session_state:
         st.session_state.closing_rodada = False
 
     if st.button("Fechar rodada selecionada", disabled=st.session_state.closing_rodada):
         st.session_state.closing_rodada = True
-    try:
-        ok, msg = fechar_rodada(rodada_to_close, fazer_backup_jogadores=True, github_upload_enabled=github_enabled)
-        if ok:
-            st.success(msg)
-        else:
-            st.error(msg)
-    finally:
-        st.session_state.closing_rodada = False
-        st.rerun()
+        try:
+            ok, msg = fechar_rodada(rodada_to_close, fazer_backup_jogadores=True, github_upload_enabled=github_enabled)
+            if ok:
+                st.success(msg)
+            else:
+                st.error(msg)
+        finally:
+            st.session_state.closing_rodada = False
+            st.rerun()
 
 # --- Bloco de diagnóstico temporário (cole para depurar) ---
 st.markdown("---")
@@ -549,7 +541,6 @@ def diagnostico_fechar(rodada_id):
     st.write("- matches dir:", matches_dir, "exists?", os.path.exists(matches_dir))
     st.write("- lista de matches:", sorted(os.listdir(matches_dir)) if os.path.exists(matches_dir) else "n/a")
 
-    # mostra conteúdo curto de meta e summary
     def _peek_json(p):
         try:
             with open(p, "r", encoding="utf-8") as f:
@@ -563,7 +554,6 @@ def diagnostico_fechar(rodada_id):
     st.write("summary.json (atual):")
     st.json(_peek_json(summary_path))
 
-    # tenta executar fechar_rodada em modo dry-run: captura retorno e exceção
     try:
         ok, msg = fechar_rodada(rodada_id, fazer_backup_jogadores=True, github_upload_enabled=False)
         st.write("fechar_rodada retornou:", ok, msg)
