@@ -42,15 +42,6 @@ def encontrar_userid_por_email(email: str):
             return uid, perfil
     return None, None
 
-def salvar_perfil(user_id: str, perfil: dict):
-    path = os.path.join(PERFIS_DIR, f"{user_id}.json")
-    try:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(perfil, f, indent=2, ensure_ascii=False)
-        return True
-    except Exception:
-        return False
-
 def carregar_perfil(user_id: str):
     path = os.path.join(PERFIS_DIR, f"{user_id}.json")
     if not os.path.exists(path):
@@ -60,6 +51,15 @@ def carregar_perfil(user_id: str):
             return json.load(f)
     except Exception:
         return None
+
+def salvar_perfil(user_id: str, perfil: dict):
+    path = os.path.join(PERFIS_DIR, f"{user_id}.json")
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(perfil, f, indent=2, ensure_ascii=False)
+        return True
+    except Exception:
+        return False
 
 # -----------------------
 # Verificação de senha (texto puro)
@@ -90,24 +90,37 @@ if st.session_state.get("login_message"):
 # -----------------------
 st.title("🔐 Entrar")
 
-email_input = st.text_input("E‑mail cadastrado", placeholder="ex: joao.cogo@unesp.br")
+email_or_userid = st.text_input("E‑mail cadastrado ou user_id", placeholder="ex: joao.cogo@unesp.br ou admin")
 senha_input = st.text_input("Senha", type="password")
 
 if st.button("Entrar"):
     # limpa flags residuais para evitar herança de estado
     limpar_estado_login_residual()
 
-    email = (email_input or "").strip()
+    identifier = (email_or_userid or "").strip()
     senha = (senha_input or "").strip()
 
-    if not email or not senha:
-        st.error("Preencha e‑mail e senha.")
+    if not identifier or not senha:
+        st.error("Preencha e‑mail/user_id e senha.")
         st.stop()
 
-    user_id, perfil = encontrar_userid_por_email(email)
+    # Primeiro tenta interpretar como e-mail (contém @)
+    user_id = None
+    perfil = None
+    if "@" in identifier:
+        user_id, perfil = encontrar_userid_por_email(identifier)
+    else:
+        # tenta carregar perfil por user_id direto
+        perfil = carregar_perfil(identifier)
+        if perfil:
+            user_id = perfil.get("user_id") or identifier
+
+        # se não encontrou por user_id, tenta como e-mail mesmo assim
+        if not user_id:
+            user_id, perfil = encontrar_userid_por_email(identifier)
 
     if not user_id:
-        st.error("E‑mail não encontrado nos perfis. Login negado.")
+        st.error("E‑mail/user_id não encontrado nos perfis. Login negado.")
         st.stop()
 
     # Verifica override de senha admin (se configurado em secrets)
