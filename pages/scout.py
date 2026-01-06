@@ -39,11 +39,10 @@ def ensure_match_state():
         st.session_state.match = {
             "running": False,
             "start_time": None,
-            "paused_at": 0.0,
             "elapsed": 0.0,
             "team_assign": {},   # player_id -> 0/1/2 (0 = none, 1 = team1, 2 = team2)
             "score": {"team1": 0, "team2": 0},
-            "events": []  # list of {time, team, scorer, assister}
+            "events": []  # list of {time, team, scorer, assister, type}
         }
 
 # ------------------------
@@ -52,172 +51,240 @@ def ensure_match_state():
 ensure_match_state()
 jogadores = carregar_jogadores()
 
-# central layout: cronômetro e controles
-st.title("📋 Painel do Olheiro")
-st.markdown("### Cronômetro da partida (centralizado)")
+# inicializa assign para novos jogadores
+for pid in jogadores.keys():
+    if pid not in st.session_state.match["team_assign"]:
+        st.session_state.match["team_assign"][pid] = 0
 
-# Cronômetro centralizado
-timer_col1, timer_col2, timer_col3 = st.columns([1, 2, 1])
-with timer_col2:
-    timer_placeholder = st.empty()
-    # controls
+# ------------------------
+# Funções de evento
+# ------------------------
+def _now_elapsed():
+    if st.session_state.match["running"]:
+        return int(time.time() - st.session_state.match["start_time"])
+    return int(st.session_state.match["elapsed"])
+
+def start_match():
+    if not st.session_state.match["running"]:
+        if st.session_state.match["start_time"] is None:
+            st.session_state.match["start_time"] = time.time()
+            st.session_state.match["elapsed"] = 0.0
+        else:
+            # retomar: ajusta start_time para descontar elapsed
+            st.session_state.match["start_time"] = time.time() - st.session_state.match["elapsed"]
+        st.session_state.match["running"] = True
+
+def pause_match():
+    if st.session_state.match["running"]:
+        st.session_state.match["elapsed"] = time.time() - st.session_state.match["start_time"]
+        st.session_state.match["running"] = False
+
+def reset_match():
+    st.session_state.match = {
+        "running": False,
+        "start_time": None,
+        "elapsed": 0.0,
+        "team_assign": {},
+        "score": {"team1": 0, "team2": 0},
+        "events": []
+    }
+    # reinit assigns
+    for pid in jogadores.keys():
+        st.session_state.match["team_assign"][pid] = 0
+
+def record_event(ev_type, team_num, scorer_pid=None, assister_pid=None, delta_scorer=0, delta_assister=0):
+    t = _now_elapsed()
+    ev = {
+        "time": t,
+        "type": ev_type,  # "gol" or "assist"
+        "team": f"team{team_num}",
+        "scorer": scorer_pid,
+        "assister": assister_pid
+    }
+    st.session_state.match["events"].append(ev)
+    # atualizar placar e jogadores
+    if ev_type == "gol" and scorer_pid:
+        if team_num == 1:
+            st.session_state.match["score"]["team1"] += delta_scorer
+        else:
+            st.session_state.match["score"]["team2"] += delta_scorer
+        jogadores[scorer_pid]["gols"] = jogadores[scorer_pid].get("gols", 0) + delta_scorer
+    if assister_pid and delta_assister != 0:
+        jogadores[assister_pid]["assistencias"] = jogadores[assister_pid].get("assistencias", 0) + delta_assister
+    salvar_jogadores(jogadores)
+
+# ------------------------
+# Layout: três colunas (Time1 | Centro | Time2)
+# ------------------------
+left_col, center_col, right_col = st.columns([3, 2, 3])
+
+# --- Centro: cronômetro e jogadores disponíveis ---
+with center_col:
+    st.markdown("<div style='text-align:center'>", unsafe_allow_html=True)
+    st.markdown("### ⏱️ Cronômetro", unsafe_allow_html=True)
+
+    # controles do cronômetro
     c1, c2, c3 = st.columns([1,1,1])
     with c1:
         if st.button("Iniciar / Retomar"):
-            if not st.session_state.match["running"]:
-                # iniciar ou retomar
-                if st.session_state.match["start_time"] is None:
-                    st.session_state.match["start_time"] = time.time()
-                    st.session_state.match["paused_at"] = 0.0
-                else:
-                    # retomar: ajusta start_time para descontar pausa
-                    st.session_state.match["start_time"] = time.time() - st.session_state.match["elapsed"]
-                st.session_state.match["running"] = True
+            start_match()
     with c2:
         if st.button("Pausar"):
-            if st.session_state.match["running"]:
-                st.session_state.match["running"] = False
-                st.session_state.match["elapsed"] = time.time() - st.session_state.match["start_time"]
+            pause_match()
     with c3:
         if st.button("Reiniciar"):
-            st.session_state.match = {
-                "running": False,
-                "start_time": None,
-                "paused_at": 0.0,
-                "elapsed": 0.0,
-                "team_assign": {},
-                "score": {"team1": 0, "team2": 0},
-                "events": []
-            }
+            reset_match()
 
-# Atualiza e exibe cronômetro
-if st.session_state.match["running"]:
-    st.session_state.match["elapsed"] = time.time() - st.session_state.match["start_time"]
+    # atualiza elapsed se estiver rodando
+    if st.session_state.match["running"]:
+        st.session_state.match["elapsed"] = time.time() - st.session_state.match["start_time"]
 
-elapsed = st.session_state.match["elapsed"]
-mins = int(elapsed // 60)
-secs = int(elapsed % 60)
-timer_placeholder.markdown(f"<h1 style='text-align:center'>{mins:02d}:{secs:02d}</h1>", unsafe_allow_html=True)
+    elapsed = int(st.session_state.match["elapsed"])
+    mins = elapsed // 60
+    secs = elapsed % 60
+    st.markdown(f"<h1 style='text-align:center;font-size:48px;margin:8px'>{mins:02d}:{secs:02d}</h1>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-st.markdown("---")
-
-# ------------------------
-# Lista de jogadores centralizada com atribuição de time
-# ------------------------
-st.markdown("### Jogadores cadastrados (atribua Time 1 / Time 2)")
-players_col1, players_col2, players_col3 = st.columns([1, 3, 1])
-with players_col2:
-    if not jogadores:
-        st.info("Nenhum jogador cadastrado.")
+    st.markdown("---")
+    st.markdown("### Jogadores disponíveis")
+    # grid de jogadores disponíveis (não atribuídos)
+    available = [ (pid, jogadores[pid]["nome"]) for pid,t in st.session_state.match["team_assign"].items() if t==0 and pid in jogadores ]
+    if not available:
+        st.write("Nenhum jogador disponível")
     else:
-        # inicializa assign se necessário
-        for pid in jogadores.keys():
-            if pid not in st.session_state.match["team_assign"]:
-                st.session_state.match["team_assign"][pid] = 0
+        # exibe em 3 colunas
+        cols = st.columns(3)
+        for i, (pid, nome) in enumerate(available):
+            col = cols[i % 3]
+            with col:
+                st.button(f"{nome}", key=f"avail-{pid}")
 
-        # exibe cada jogador com selectbox para time
-        for pid, p in sorted(jogadores.items(), key=lambda kv: kv[1].get("nome","").lower()):
+# --- Left: Time 1 ---
+with left_col:
+    st.markdown("## TIME 1")
+    st.metric("Placar Time 1", st.session_state.match["score"]["team1"])
+    st.markdown("---")
+    # lista jogadores do time 1
+    team1 = [ (pid, jogadores[pid]) for pid,t in st.session_state.match["team_assign"].items() if t==1 and pid in jogadores ]
+    if not team1:
+        st.write("Nenhum jogador atribuído ao Time 1")
+    else:
+        for pid, p in team1:
             nome = p.get("nome", pid)
-            cols = st.columns([3,1])
+            cols = st.columns([3,1,1,1,1])
             with cols[0]:
                 st.markdown(f"**{nome}**")
+                st.caption(f"Gols: {p.get('gols',0)} | Assistências: {p.get('assistencias',0)}")
+            # + gol
             with cols[1]:
-                choice = st.selectbox(
-                    label=f"team-{pid}",
-                    options=[0,1,2],
-                    format_func=lambda v: "Nenhum" if v==0 else ("Time 1" if v==1 else "Time 2"),
-                    index=st.session_state.match["team_assign"].get(pid,0)
-                )
-                st.session_state.match["team_assign"][pid] = choice
+                if st.button("+ Gol", key=f"+gol-{pid}"):
+                    record_event("gol", 1, scorer_pid=pid, assister_pid=None, delta_scorer=1, delta_assister=0)
+                    st.experimental_rerun()
+            # - gol (descontar)
+            with cols[2]:
+                if st.button("- Gol", key=f"-gol-{pid}"):
+                    # só desconta se gols > 0
+                    if p.get("gols",0) > 0:
+                        record_event("gol", 1, scorer_pid=pid, assister_pid=None, delta_scorer=-1, delta_assister=0)
+                        st.experimental_rerun()
+            # + assist
+            with cols[3]:
+                if st.button("+ Assist", key=f"+ast-{pid}"):
+                    # registra assistência (não altera placar)
+                    record_event("assist", 1, scorer_pid=None, assister_pid=pid, delta_scorer=0, delta_assister=1)
+                    st.experimental_rerun()
+            # - assist
+            with cols[4]:
+                if st.button("- Assist", key=f"-ast-{pid}"):
+                    if p.get("assistencias",0) > 0:
+                        record_event("assist", 1, scorer_pid=None, assister_pid=pid, delta_scorer=0, delta_assister=-1)
+                        st.experimental_rerun()
 
+# --- Right: Time 2 ---
+with right_col:
+    st.markdown("## TIME 2")
+    st.metric("Placar Time 2", st.session_state.match["score"]["team2"])
+    st.markdown("---")
+    team2 = [ (pid, jogadores[pid]) for pid,t in st.session_state.match["team_assign"].items() if t==2 and pid in jogadores ]
+    if not team2:
+        st.write("Nenhum jogador atribuído ao Time 2")
+    else:
+        for pid, p in team2:
+            nome = p.get("nome", pid)
+            cols = st.columns([3,1,1,1,1])
+            with cols[0]:
+                st.markdown(f"**{nome}**")
+                st.caption(f"Gols: {p.get('gols',0)} | Assistências: {p.get('assistencias',0)}")
+            with cols[1]:
+                if st.button("+ Gol", key=f"+gol2-{pid}"):
+                    record_event("gol", 2, scorer_pid=pid, assister_pid=None, delta_scorer=1, delta_assister=0)
+                    st.experimental_rerun()
+            with cols[2]:
+                if st.button("- Gol", key=f"-gol2-{pid}"):
+                    if p.get("gols",0) > 0:
+                        record_event("gol", 2, scorer_pid=pid, assister_pid=None, delta_scorer=-1, delta_assister=0)
+                        st.experimental_rerun()
+            with cols[3]:
+                if st.button("+ Assist", key=f"+ast2-{pid}"):
+                    record_event("assist", 2, scorer_pid=None, assister_pid=pid, delta_scorer=0, delta_assister=1)
+                    st.experimental_rerun()
+            with cols[4]:
+                if st.button("- Assist", key=f"-ast2-{pid}"):
+                    if p.get("assistencias",0) > 0:
+                        record_event("assist", 2, scorer_pid=None, assister_pid=pid, delta_scorer=0, delta_assister=-1)
+                        st.experimental_rerun()
+
+# ------------------------
+# Painel de atribuição (abaixo): permite atribuir jogadores a times rapidamente
+# ------------------------
 st.markdown("---")
+st.markdown("### Atribuir jogadores rapidamente")
+assign_cols = st.columns([3,3,2])
+with assign_cols[0]:
+    st.write("Jogadores")
+    for pid, p in sorted(jogadores.items(), key=lambda kv: kv[1].get("nome","")):
+        st.write(f"- {p.get('nome','—')} (ID: {pid})")
+with assign_cols[1]:
+    st.write("Atribuir")
+    for pid, p in sorted(jogadores.items(), key=lambda kv: kv[1].get("nome","")):
+        cur = st.session_state.match["team_assign"].get(pid, 0)
+        choice = st.selectbox(f"team-{pid}", options=[0,1,2], index=cur,
+                              format_func=lambda v: "Nenhum" if v==0 else ("Time 1" if v==1 else "Time 2"),
+                              key=f"assign-{pid}")
+        st.session_state.match["team_assign"][pid] = choice
+with assign_cols[2]:
+    if st.button("Salvar atribuições"):
+        st.success("Atribuições salvas.")
+        st.experimental_rerun()
 
 # ------------------------
-# Placar e registro de eventos (apenas quando partida iniciou)
+# Eventos registrados (histórico)
 # ------------------------
-st.markdown("### Placar e registro de gols/assistências")
-score_col1, score_col2, score_col3 = st.columns([1,1,1])
-with score_col1:
-    st.metric("Time 1", st.session_state.match["score"]["team1"])
-with score_col3:
-    st.metric("Time 2", st.session_state.match["score"]["team2"])
-
-# Função auxiliar para obter players por time
-def players_in_team(team_num):
-    return [(pid, jogadores[pid]["nome"]) for pid, t in st.session_state.match["team_assign"].items() if t==team_num and pid in jogadores]
-
-# Registrar gol
-st.markdown("#### Registrar Gol")
-if st.session_state.match["running"]:
-    tcol1, tcol2 = st.columns(2)
-    with tcol1:
-        team_choice = st.radio("Escolha o time", [1,2], index=0, horizontal=True)
-    with tcol2:
-        team_players = players_in_team(team_choice)
-        if not team_players:
-            st.warning("Nenhum jogador atribuído a esse time.")
-        else:
-            scorer_pid = st.selectbox("Autor do gol", options=[pid for pid,_ in team_players], format_func=lambda pid: jogadores[pid]["nome"])
-            assister_options = [pid for pid,_ in team_players if pid != scorer_pid]
-            assister_pid = st.selectbox("Assistência (opcional)", options=[None]+assister_options, format_func=lambda v: (jogadores[v]["nome"] if v else "Nenhuma"))
-            if st.button("Registrar Gol"):
-                # atualiza placar e eventos
-                if team_choice == 1:
-                    st.session_state.match["score"]["team1"] += 1
-                else:
-                    st.session_state.match["score"]["team2"] += 1
-                event = {
-                    "time": int(st.session_state.match["elapsed"]),
-                    "team": f"team{team_choice}",
-                    "scorer": scorer_pid,
-                    "assister": assister_pid
-                }
-                st.session_state.match["events"].append(event)
-                # incrementa contadores locais (não persiste ainda)
-                jogadores[scorer_pid]["gols"] = jogadores[scorer_pid].get("gols",0) + 1
-                if assister_pid:
-                    jogadores[assister_pid]["assistencias"] = jogadores[assister_pid].get("assistencias",0) + 1
-                salvar_jogadores(jogadores)
-                st.success("Gol registrado!")
-                st.experimental_rerun()
-else:
-    st.info("Inicie o cronômetro para registrar gols/assistências.")
-
 st.markdown("---")
-
-# ------------------------
-# Eventos registrados
-# ------------------------
 st.markdown("### Eventos registrados")
 if not st.session_state.match["events"]:
     st.write("Nenhum evento registrado.")
 else:
     for ev in st.session_state.match["events"]:
         t = ev["time"]
-        mm = t//60
-        ss = t%60
-        scorer_name = jogadores.get(ev["scorer"], {}).get("nome", ev["scorer"])
-        assister_name = jogadores.get(ev["assister"], {}).get("nome", "") if ev.get("assister") else ""
-        st.write(f"{mm:02d}:{ss:02d} — {ev['team']} — Gol: **{scorer_name}**" + (f" | Assist: {assister_name}" if assister_name else ""))
+        mm = t // 60
+        ss = t % 60
+        if ev["type"] == "gol":
+            scorer_name = jogadores.get(ev["scorer"], {}).get("nome", ev.get("scorer"))
+            assister_name = jogadores.get(ev["assister"], {}).get("nome", "") if ev.get("assister") else ""
+            st.write(f"{mm:02d}:{ss:02d} — {ev['team']} — Gol: **{scorer_name}**" + (f" | Assist: {assister_name}" if assister_name else ""))
+        else:
+            assister_name = jogadores.get(ev["assister"], {}).get("nome", ev.get("assister"))
+            st.write(f"{mm:02d}:{ss:02d} — {ev['team']} — Assistência: **{assister_name}**")
 
+# ------------------------
+# Finalizar / Logout
+# ------------------------
 st.markdown("---")
-
-# ------------------------
-# Finalizar partida / salvar / logout
-# ------------------------
 end_col1, end_col2 = st.columns([1,1])
 with end_col1:
-    if st.button("Finalizar partida (salvar e zerar)"):
-        # já salvamos gols/assistências no arquivo a cada gol; aqui apenas limpa estado de partida
-        st.session_state.match = {
-            "running": False,
-            "start_time": None,
-            "paused_at": 0.0,
-            "elapsed": 0.0,
-            "team_assign": {},
-            "score": {"team1": 0, "team2": 0},
-            "events": []
-        }
+    if st.button("Finalizar partida (reiniciar estado)"):
+        reset_match()
         st.success("Partida finalizada e estado reiniciado.")
         st.experimental_rerun()
 with end_col2:
