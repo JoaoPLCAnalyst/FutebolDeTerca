@@ -301,3 +301,195 @@ if os.path.exists(rodadas_base):
             st.write(f"- **{r[0]}** — {r[1]} — início: {r[2]} — partidas: {r[3]}")
 else:
     st.write("Nenhuma rodada encontrada")
+# ------------------------
+# Fechar rodada (Admin)
+# ------------------------
+import shutil
+import glob
+import tempfile
+from datetime import datetime, timezone
+
+def _write_atomic(path, data_bytes):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))
+    os.close(fd)
+    with open(tmp, "wb") as f:
+        f.write(data_bytes)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+def _load_json(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+def fechar_rodada(rodada_id, fazer_backup_jogadores=True, github_upload_enabled=False):
+    base = os.path.join("database", "rodadas", rodada_id)
+    meta_path = os.path.join(base, "meta.json")
+    matches_dir = os.path.join(base, "matches")
+    summary_path = os.path.join(base, "summary.json")
+
+    # valida meta
+    meta = _load_json(meta_path)
+    if not meta:
+        return False, "meta.json não encontrado ou inválido"
+    if meta.get("status") != "open":
+        return False, f"Rodada já está com status '{meta.get('status')}'"
+
+    # lista arquivos de partida
+    match_files = sorted(glob.glob(os.path.join(matches_dir, "*.json")))
+    if not match_files:
+        return False, "Nenhuma partida encontrada para agregar"
+
+    # agregadores
+    resumo_por_jogador = {}
+    placar_por_partida = {}
+    matches_list = []
+
+    for mf in match_files:
+        m = _load_json(mf)
+        if not m:
+            # pula arquivos inválidos
+            continue
+        match_id = m.get("id") or os.path.splitext(os.path.basename(mf))[0]
+        matches_list.append(match_id)
+        placar_por_partida[match_id] = m.get("score", {"team1":0,"team2":0})
+
+        # determina vencedor da partida
+        s = m.get("score", {"team1":0,"team2":0})
+        if s.get("team1",0) > s.get("team2",0):
+            vencedor_match = "team1"
+        elif s.get("team2",0) > s.get("team1",0):
+            vencedor_match = "team2"
+        else:
+            vencedor_match = "empate"
+
+        # resumo por eventos (gols/assist)
+        events = m.get("events", [])
+        for ev in events:
+            if ev.get("type") == "gol" and ev.get("scorer"):
+                pid = ev["scorer"]
+                resumo_por_jogador.setdefault(pid, {"gols":0,"assistencias":0,"vitorias":0})
+                resumo_por_jogador[pid]["gols"] += 1
+            if ev.get("type") == "assist" and ev.get("assister"):
+                pid = ev["assister"]
+                resumo_por_jogador.setdefault(pid, {"gols":0,"assistencias":0,"vitorias":0})
+                resumo_por_jogador[pid]["assistencias"] += 1
+
+        # vitorias por jogador: incrementa para jogadores atribuídos ao time vencedor
+        if vencedor_match in ("team1","team2"):
+            team_assign = m.get("team_assign", {})
+            winning_team_num = 1 if vencedor_match == "team1" else 2
+            for pid, team in team_assign.items():
+                if team == winning_team_num:
+                    resumo_por_jogador.setdefault(pid, {"gols":0,"assistencias":0,"vitorias":0})
+                    resumo_por_jogador[pid]["vitorias"] = resumo_por_jogador[pid].get("vitorias",0) + 1
+
+    # monta summary
+    summary = {
+        "rodada_id": rodada_id,
+        "timestamp_closed": datetime.now(timezone.utc).isoformat(),
+        "matches": matches_list,
+        "placar_por_partida": placar_por_partida,
+        "resumo_por_jogador": resumo_por_jogador,
+        "meta_snapshot": meta
+    }
+
+    # grava summary atômico
+    try:
+        _write_atomic(summary_path, json.dumps(summary, ensure_ascii=False, indent=2).encode("utf-8"))
+    except Exception as e:
+        return False, f"Falha ao gravar summary.json: {e}"
+
+    # backup jogadores.json
+    if fazer_backup_jogadores and os.path.exists(JOGADORES_FILE):
+        try:
+            ts = datetime.now().strftime("%Y%m%dT%H%M%S")
+            shutil.copy(JOGADORES_FILE, f"{JOGADORES_FILE}.bak-{ts}")
+        except Exception as e:
+            return False, f"Falha ao criar backup de jogadores.json: {e}"
+
+    # atualiza jogadores.json incrementalmente
+    try:
+        jogadores_on_disk = {}
+        if os.path.exists(JOGADORES_FILE):
+            with open(JOGADORES_FILE, "r", encoding="utf-8") as f:
+                jogadores_on_disk = json.load(f)
+
+        # aplica incrementos
+        for pid, vals in resumo_por_jogador.items():
+            if pid not in jogadores_on_disk:
+                jogadores_on_disk[pid] = {
+                    "nome": pid,
+                    "valor": 0,
+                    "gols": 0,
+                    "assistencias": 0,
+                    "imagem": "",
+                    "vitorias": 0
+                }
+            jogadores_on_disk[pid]["gols"] = jogadores_on_disk[pid].get("gols",0) + vals.get("gols",0)
+            jogadores_on_disk[pid]["assistencias"] = jogadores_on_disk[pid].get("assistencias",0) + vals.get("assistencias",0)
+            jogadores_on_disk[pid]["vitorias"] = jogadores_on_disk[pid].get("vitorias",0) + vals.get("vitorias",0)
+
+        # grava atômico jogadores.json
+        _write_atomic(JOGADORES_FILE, json.dumps(jogadores_on_disk, ensure_ascii=False, indent=2).encode("utf-8"))
+    except Exception as e:
+        # opcional: remover summary.json ou marcar meta como error
+        return False, f"Falha ao atualizar jogadores.json: {e}"
+
+    # atualiza meta.json com fim e status closed e match_count
+    try:
+        meta["fim"] = datetime.now(timezone.utc).isoformat()
+        meta["status"] = "closed"
+        meta["summary_file"] = os.path.basename(summary_path)
+        meta["match_count"] = len(matches_list)
+        _write_atomic(meta_path, json.dumps(meta, ensure_ascii=False, indent=2).encode("utf-8"))
+    except Exception as e:
+        return False, f"Falha ao atualizar meta.json: {e}"
+
+    # upload GitHub opcional
+    if github_upload_enabled and GITHUB_USER and GITHUB_REPO and GITHUB_TOKEN:
+        try:
+            ok1, out1 = github_upload(summary_path, f"database/rodadas/{rodada_id}/summary.json", f"Adiciona summary da rodada {rodada_id}")
+            ok2, out2 = github_upload(meta_path, f"database/rodadas/{rodada_id}/meta.json", f"Fecha rodada {rodada_id}")
+            ok3, out3 = github_upload(JOGADORES_FILE, JOGADORES_FILE, f"Atualiza jogadores após fechamento de {rodada_id}")
+            # warnings se algum upload falhar
+            if not ok1 or not ok2 or not ok3:
+                return True, f"Rodada fechada localmente; upload parcial: {out1}; {out2}; {out3}"
+        except Exception as e:
+            return True, f"Rodada fechada localmente; erro no upload GitHub: {e}"
+
+    return True, "Rodada fechada com sucesso"
+
+# UI: botão para fechar rodada
+st.markdown("---")
+st.subheader("🔴 Fechar rodada")
+rodadas_base = os.path.join("database", "rodadas")
+open_rodadas = []
+if os.path.exists(rodadas_base):
+    for name in sorted(os.listdir(rodadas_base)):
+        mp = os.path.join(rodadas_base, name, "meta.json")
+        if os.path.exists(mp):
+            try:
+                with open(mp, "r", encoding="utf-8") as f:
+                    m = json.load(f)
+                if m.get("status") == "open":
+                    open_rodadas.append(name)
+            except Exception:
+                continue
+
+if not open_rodadas:
+    st.info("Nenhuma rodada aberta para fechar.")
+else:
+    rodada_to_close = st.selectbox("Selecionar rodada para fechar", options=open_rodadas)
+    github_enabled = bool(GITHUB_USER and GITHUB_REPO and GITHUB_TOKEN)
+    if st.button("Fechar rodada selecionada"):
+        ok, msg = fechar_rodada(rodada_to_close, fazer_backup_jogadores=True, github_upload_enabled=github_enabled)
+        if ok:
+            st.success(msg)
+        else:
+            st.error(msg)
+        st.rerun()
