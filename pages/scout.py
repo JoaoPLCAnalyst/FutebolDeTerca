@@ -156,20 +156,20 @@ def render_player_block(pid, p, team_num):
 
     cols = st.columns([1,1,1,1])
     # + Gol
-    if cols[0].button("+ Gol", key=f"+gol-{team_num}-{pid}"):
+    if cols[0].button("Adicionar Gol", key=f"+gol-{team_num}-{pid}"):
         record_event("gol", team_num, scorer_pid=pid, assister_pid=None, delta_scorer=1, delta_assister=0)
         st.rerun()
     # - Gol
-    if cols[1].button("- Gol", key=f"-gol-{team_num}-{pid}"):
+    if cols[1].button("Remover Gol", key=f"-gol-{team_num}-{pid}"):
         if gols > 0:
             record_event("gol", team_num, scorer_pid=pid, assister_pid=None, delta_scorer=-1, delta_assister=0)
             st.rerun()
     # + Assist
-    if cols[2].button("+ Assist", key=f"+ast-{team_num}-{pid}"):
+    if cols[2].button("Adicionar Assist", key=f"+ast-{team_num}-{pid}"):
         record_event("assist", team_num, scorer_pid=None, assister_pid=pid, delta_scorer=0, delta_assister=1)
         st.rerun()
     # - Assist
-    if cols[3].button("- Assist", key=f"-ast-{team_num}-{pid}"):
+    if cols[3].button("Remover Assist", key=f"-ast-{team_num}-{pid}"):
         if asts > 0:
             record_event("assist", team_num, scorer_pid=None, assister_pid=pid, delta_scorer=0, delta_assister=-1)
             st.rerun()
@@ -182,11 +182,8 @@ def render_player_block(pid, p, team_num):
     else:
         if b1.button("→ Time 1", key=f"move-to1-{pid}"):
             assign_player(pid, 1)
-    if b2.button("Remover (Nenhum)", key=f"move-none-{team_num}-{pid}"):
+    if b2.button("Remover", key=f"move-none-{team_num}-{pid}"):
         assign_player(pid, 0)
-    # botão para ver detalhes (opcional)
-    if b3.button("Detalhes", key=f"det-{team_num}-{pid}"):
-        st.write(f"ID: {pid}")
 
 # ------------------------
 # Layout: três colunas (Time1 | Centro | Time2)
@@ -260,29 +257,6 @@ with right_col:
         for pid, p in team2:
             render_player_block(pid, p, team_num=2)
             st.markdown("---")
-
-# ------------------------
-# Painel de atribuição (abaixo): permite atribuir jogadores a times rapidamente (opcional)
-# ------------------------
-st.markdown("---")
-st.markdown("### Atribuir jogadores rapidamente (lista)")
-assign_cols = st.columns([3,3,2])
-with assign_cols[0]:
-    st.write("Jogadores")
-    for pid, p in sorted(jogadores.items(), key=lambda kv: kv[1].get("nome","")):
-        st.write(f"- {p.get('nome','—')} (ID: {pid})")
-with assign_cols[1]:
-    st.write("Atribuir")
-    for pid, p in sorted(jogadores.items(), key=lambda kv: kv[1].get("nome","")):
-        cur = st.session_state.match["team_assign"].get(pid, 0)
-        choice = st.selectbox(f"team-{pid}", options=[0,1,2], index=cur,
-                              format_func=lambda v: "Nenhum" if v==0 else ("Time 1" if v==1 else "Time 2"),
-                              key=f"assign-{pid}")
-        st.session_state.match["team_assign"][pid] = choice
-with assign_cols[2]:
-    if st.button("Salvar atribuições"):
-        st.success("Atribuições salvas.")
-        st.rerun()
 
 # ------------------------
 # Eventos registrados (histórico) com Desfazer
