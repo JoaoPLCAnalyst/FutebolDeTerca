@@ -11,6 +11,7 @@ import tempfile
 import shutil
 import glob
 from datetime import datetime, timezone
+from utils.scores import generate_and_apply_scores
 
 # =========================
 # CONFIGURAÇÃO DA PÁGINA
@@ -385,6 +386,15 @@ def fechar_rodada(rodada_id, fazer_backup_jogadores=True, github_upload_enabled=
         _write_atomic(summary_path, json.dumps(summary, ensure_ascii=False, indent=2).encode("utf-8"))
     except Exception as e:
         return False, f"Falha ao gravar summary.json: {e}"
+
+        # gera scores.json e aplica em jogadores.json (idempotente)
+    try:
+        github_fn = (lambda p, rp, m: github_upload(p, rp, m)) if (github_upload_enabled and GITHUB_USER and GITHUB_REPO and GITHUB_TOKEN) else None
+        res_scores = generate_and_apply_scores(base, summary, formula={"gol":8,"assist":4,"vitoria":4}, jogadores_path=JOGADORES_FILE, github_upload_fn=github_fn)
+        # opcional: mostrar resultado no admin
+        # st.info(f"Scores aplicados: {res_scores['applied']} | pulados: {res_scores['skipped']}")
+    except Exception as e:
+        return False, f"Falha ao gerar/aplicar scores.json: {e}"
 
     # backup jogadores.json
     if fazer_backup_jogadores and os.path.exists(JOGADORES_FILE):
