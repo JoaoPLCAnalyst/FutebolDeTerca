@@ -1,0 +1,57 @@
+{
+  "rodada_id": "2026-01-06-rodada-03",
+  "timestamp_start": null,
+  "timestamp_end": "2026-01-06T22:29:37.854218+00:00",
+  "duration_seconds": 0,
+  "team_assign": {
+    "joao-5c0f835c": 1,
+    "eudes-4655e992": 1,
+    "izadora-b7eaaa2b": 2
+  },
+  "score": {
+    "team1": 2,
+    "team2": 2
+  },
+  "events": [
+    {
+      "time": 0,
+      "type": "gol",
+      "team": "team2",
+      "scorer": "izadora-b7eaaa2b",
+      "assister": null
+    },
+    {
+      "time": 0,
+      "type": "gol",
+      "team": "team2",
+      "scorer": "izadora-b7eaaa2b",
+      "assister": null
+    },
+    {
+      "time": 0,
+      "type": "gol",
+      "team": "team1",
+      "scorer": "eudes-4655e992",
+      "assister": null
+    },
+    {
+      "time": 0,
+      "type": "gol",
+      "team": "team1",
+      "scorer": "eudes-4655e992",
+      "assister": null
+    }
+  ],
+  "resumo_jogadores": {
+    "izadora-b7eaaa2b": {
+      "gols": 2,
+      "assistencias": 0
+    },
+    "eudes-4655e992": {
+      "gols": 2,
+      "assistencias": 0
+    }
+  },
+  "id": "2026-01-06-match-02",
+  "timestamp_utc": "2026-01-06T22:29:37.855576+00:00"
+}
