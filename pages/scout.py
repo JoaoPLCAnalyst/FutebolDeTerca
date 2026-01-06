@@ -4,6 +4,10 @@ import json
 import os
 import time
 from datetime import datetime
+import tempfile
+import uuid
+import base64
+import requests
 
 st.set_page_config(page_title="Olheiro - Futebol de Terça", layout="wide")
 
@@ -44,6 +48,33 @@ def ensure_match_state():
             "score": {"team1": 0, "team2": 0},
             "events": []  # list of {time, type, team, scorer, assister}
         }
+
+# ------------------------
+# GitHub upload opcional (usa secrets GITHUB_USER, GITHUB_REPO, GITHUB_TOKEN, GITHUB_BRANCH)
+# ------------------------
+GITHUB_USER = st.secrets.get("GITHUB_USER", "")
+GITHUB_REPO = st.secrets.get("GITHUB_REPO", "")
+GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
+GITHUB_BRANCH = st.secrets.get("GITHUB_BRANCH", "main")
+
+def github_upload(path_local, repo_path, message):
+    """Envia arquivo local ao GitHub (opcional). Retorna (ok, msg)."""
+    if not GITHUB_USER or not GITHUB_REPO or not GITHUB_TOKEN:
+        return False, "GitHub não configurado"
+    headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"}
+    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{repo_path}"
+    with open(path_local, "rb") as f:
+        content_b64 = base64.b64encode(f.read()).decode()
+    get_file = requests.get(url, headers=headers, params={"ref": GITHUB_BRANCH})
+    sha = get_file.json().get("sha") if get_file.status_code == 200 else None
+    payload = {"message": message, "content": content_b64, "branch": GITHUB_BRANCH}
+    if sha:
+        payload["sha"] = sha
+    resp = requests.put(url, headers=headers, json=payload)
+    if resp.status_code in (200, 201):
+        return True, f"ok ({resp.status_code})"
+    else:
+        return False, f"erro ({resp.status_code}): {resp.text}"
 
 # ------------------------
 # Inicialização
@@ -274,33 +305,33 @@ with right_col:
 # ------------------------
 # Painel de atribuição (abaixo): permite atribuir jogadores a times rapidamente (opcional)
 # ------------------------
-st.markdown("---")
-st.markdown("### Atribuir jogadores rapidamente (lista)")
-assign_cols = st.columns([3,3,2])
-with assign_cols[0]:
-    st.write("Jogadores")
-    for pid, p in sorted(jogadores.items(), key=lambda kv: kv[1].get("nome","")):
-        st.write(f"- {p.get('nome','—')} (ID: {pid})")
-with assign_cols[1]:
-    st.write("Atribuir")
-    for pid, p in sorted(jogadores.items(), key=lambda kv: kv[1].get("nome","")):
-        cur = st.session_state.match["team_assign"].get(pid, 0)
-        # desabilita selectbox enquanto partida estiver rodando
-        choice = st.selectbox(
-            f"team-{pid}",
-            options=[0,1,2],
-            index=cur,
-            format_func=lambda v: "Nenhum" if v==0 else ("Time 1" if v==1 else "Time 2"),
-            key=f"assign-{pid}",
-            disabled=st.session_state.match.get("running", False)
-        )
-        # só atualiza se não estiver rodando
-        if not st.session_state.match.get("running", False):
-            st.session_state.match["team_assign"][pid] = choice
-with assign_cols[2]:
-    if st.button("Salvar atribuições", disabled=st.session_state.match.get("running", False)):
-        st.success("Atribuições salvas.")
-        st.rerun()
+# st.markdown("---")
+# st.markdown("### Atribuir jogadores rapidamente (lista)")
+# assign_cols = st.columns([3,3,2])
+# with assign_cols[0]:
+#     st.write("Jogadores")
+#     for pid, p in sorted(jogadores.items(), key=lambda kv: kv[1].get("nome","")):
+#         st.write(f"- {p.get('nome','—')} (ID: {pid})")
+# with assign_cols[1]:
+#     st.write("Atribuir")
+#     for pid, p in sorted(jogadores.items(), key=lambda kv: kv[1].get("nome","")):
+#         cur = st.session_state.match["team_assign"].get(pid, 0)
+#         # desabilita selectbox enquanto partida estiver rodando
+#         choice = st.selectbox(
+#             f"team-{pid}",
+#             options=[0,1,2],
+#             index=cur,
+#             format_func=lambda v: "Nenhum" if v==0 else ("Time 1" if v==1 else "Time 2"),
+#             key=f"assign-{pid}",
+#             disabled=st.session_state.match.get("running", False)
+#         )
+#         # só atualiza se não estiver rodando
+#         if not st.session_state.match.get("running", False):
+#             st.session_state.match["team_assign"][pid] = choice
+# with assign_cols[2]:
+#     if st.button("Salvar atribuições", disabled=st.session_state.match.get("running", False)):
+#         st.success("Atribuições salvas.")
+#         st.rerun()
 
 # ------------------------
 # Eventos registrados (histórico) com Desfazer
@@ -328,14 +359,130 @@ with events_col:
                 st.write(f"{mm:02d}:{ss:02d} — {ev['team']} — Assistência: **{assister_name}**")
 
 # ------------------------
-# Finalizar / Logout
+# Finalizar / Logout (gera arquivo por rodada e atualiza jogadores.json)
 # ------------------------
+def _write_atomic(path, data_bytes):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))
+    os.close(fd)
+    with open(tmp, "wb") as f:
+        f.write(data_bytes)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+def _rodada_filepath(rodada_id):
+    return os.path.join("database", "rodadas", f"{rodada_id}.json")
+
+def _persistir_rodada_e_atualizar_jogadores():
+    # prepara diretório de rodadas
+    rodadas_dir = os.path.join("database", "rodadas")
+    os.makedirs(rodadas_dir, exist_ok=True)
+
+    # gera id e caminho
+    rodada_id = f"rodada-{uuid.uuid4().hex[:8]}"
+    rodada_path = _rodada_filepath(rodada_id)
+
+    # monta resumo_jogadores a partir dos events
+    resumo = {}
+    for ev in st.session_state.match.get("events", []):
+        if ev.get("type") == "gol" and ev.get("scorer"):
+            pid = ev["scorer"]
+            resumo.setdefault(pid, {"gols": 0, "assistencias": 0})
+            resumo[pid]["gols"] += 1
+        if ev.get("type") == "assist" and ev.get("assister"):
+            pid = ev["assister"]
+            resumo.setdefault(pid, {"gols": 0, "assistencias": 0})
+            resumo[pid]["assistencias"] += 1
+
+    score = st.session_state.match.get("score", {"team1": 0, "team2": 0})
+    if score.get("team1", 0) > score.get("team2", 0):
+        vencedor = "team1"
+    elif score.get("team2", 0) > score.get("team1", 0):
+        vencedor = "team2"
+    else:
+        vencedor = "empate"
+
+    rodada_entry = {
+        "id": rodada_id,
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "vencedor": vencedor,
+        "placar": score,
+        "events": st.session_state.match.get("events", []),
+        "resumo_jogadores": resumo
+    }
+
+    # idempotência simples: se arquivo já existe, aborta
+    if os.path.exists(rodada_path):
+        st.warning("Rodada já registrada. Operação abortada.")
+        return False
+
+    # grava rodada atômica
+    try:
+        _write_atomic(rodada_path, json.dumps(rodada_entry, ensure_ascii=False, indent=2).encode("utf-8"))
+    except Exception as e:
+        st.error(f"Falha ao salvar arquivo da rodada: {e}")
+        return False
+
+    # atualiza jogadores.json incrementando totais
+    try:
+        # carrega do disco para evitar sobrescrever mudanças externas
+        if os.path.exists(JOGADORES_FILE):
+            with open(JOGADORES_FILE, "r", encoding="utf-8") as f:
+                jogadores_on_disk = json.load(f)
+        else:
+            jogadores_on_disk = {}
+
+        # aplica incrementos do resumo
+        for pid, vals in resumo.items():
+            if pid not in jogadores_on_disk:
+                # cria registro mínimo se não existir
+                jogadores_on_disk[pid] = {
+                    "nome": pid,
+                    "valor": 0,
+                    "gols": 0,
+                    "assistencias": 0,
+                    "imagem": ""
+                }
+            jogadores_on_disk[pid]["gols"] = jogadores_on_disk[pid].get("gols", 0) + vals.get("gols", 0)
+            jogadores_on_disk[pid]["assistencias"] = jogadores_on_disk[pid].get("assistencias", 0) + vals.get("assistencias", 0)
+
+        # incrementa vitorias por jogador se desejar: aqui incrementa vitorias para todos do time vencedor
+        if vencedor in ("team1", "team2"):
+            for pid, team in st.session_state.match.get("team_assign", {}).items():
+                if team == (1 if vencedor == "team1" else 2):
+                    jogadores_on_disk[pid]["vitorias"] = jogadores_on_disk[pid].get("vitorias", 0) + 1
+
+        # grava jogadores.json atômico
+        _write_atomic(JOGADORES_FILE, json.dumps(jogadores_on_disk, ensure_ascii=False, indent=2).encode("utf-8"))
+
+        # opcional: upload para GitHub dos arquivos novos/alterados
+        if GITHUB_USER and GITHUB_REPO and GITHUB_TOKEN:
+            ok1, out1 = github_upload(rodada_path, f"database/rodadas/{os.path.basename(rodada_path)}", f"Adiciona rodada {rodada_id}")
+            ok2, out2 = github_upload(JOGADORES_FILE, JOGADORES_FILE, f"Atualiza jogadores após {rodada_id}")
+            if not ok1:
+                st.warning(f"Rodada salva localmente, mas falha ao enviar para GitHub: {out1}")
+            if not ok2:
+                st.warning(f"Jogadores atualizados localmente, mas falha ao enviar para GitHub: {out2}")
+
+    except Exception as e:
+        st.error(f"Falha ao atualizar jogadores: {e}")
+        # opcional: remover o arquivo de rodada se desejar rollback
+        return False
+
+    return True
+
+# Botões finais: Finalizar partida e Sair (olheiro)
 st.markdown("---")
 end_col1, end_col2 = st.columns([1,1])
 with end_col1:
     if st.button("Finalizar partida (reiniciar estado)"):
-        reset_match()
-        st.success("Partida finalizada e estado reiniciado.")
+        ok = _persistir_rodada_e_atualizar_jogadores()
+        if ok:
+            reset_match()
+            st.success("Partida finalizada, resultado registrado e estado reiniciado.")
+        else:
+            st.error("Ocorreu um problema ao registrar a rodada; verifique os logs e tente novamente.")
         st.rerun()
 with end_col2:
     if st.button("Sair (olheiro)"):
