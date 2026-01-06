@@ -72,11 +72,13 @@ def start_match():
         else:
             st.session_state.match["start_time"] = time.time() - st.session_state.match["elapsed"]
         st.session_state.match["running"] = True
+        st.rerun()
 
 def pause_match():
     if st.session_state.match["running"]:
         st.session_state.match["elapsed"] = time.time() - st.session_state.match["start_time"]
         st.session_state.match["running"] = False
+        st.rerun()
 
 def reset_match():
     st.session_state.match = {
@@ -89,8 +91,13 @@ def reset_match():
     }
     for pid in jogadores.keys():
         st.session_state.match["team_assign"][pid] = 0
+    st.rerun()
 
 def assign_player(pid, team_num):
+    # não permite alterar atribuições enquanto a partida estiver rodando
+    if st.session_state.match.get("running"):
+        st.warning("Não é possível alterar atribuições enquanto a partida estiver em andamento.")
+        return
     st.session_state.match["team_assign"][pid] = team_num
     st.rerun()
 
@@ -175,15 +182,20 @@ def render_player_block(pid, p, team_num):
             st.rerun()
 
     # botões rápidos abaixo para mover entre times / remover
+    # desabilita movimentação enquanto partida estiver rodando
+    disabled_moves = st.session_state.match.get("running", False)
     b1, b2, b3 = st.columns([1,1,1])
     if team_num == 1:
-        if b1.button("→ Time 2", key=f"move-to2-{pid}"):
+        if b1.button("→ Time 2", key=f"move-to2-{pid}", disabled=disabled_moves):
             assign_player(pid, 2)
     else:
-        if b1.button("→ Time 1", key=f"move-to1-{pid}"):
+        if b1.button("→ Time 1", key=f"move-to1-{pid}", disabled=disabled_moves):
             assign_player(pid, 1)
-    if b2.button("Remover", key=f"move-none-{team_num}-{pid}"):
+    if b2.button("Remover", key=f"move-none-{team_num}-{pid}", disabled=disabled_moves):
         assign_player(pid, 0)
+    # botão para ver detalhes (opcional)
+    if b3.button("Detalhes", key=f"det-{team_num}-{pid}"):
+        st.write(f"ID: {pid}")
 
 # ------------------------
 # Layout: três colunas (Time1 | Centro | Time2)
@@ -197,10 +209,10 @@ with center_col:
 
     c1, c2, c3 = st.columns([1,1,1])
     with c1:
-        if st.button("Iniciar / Retomar"):
+        if st.button("Iniciar / Retomar", disabled=st.session_state.match.get("running", False)):
             start_match()
     with c2:
-        if st.button("Pausar"):
+        if st.button("Pausar", disabled=not st.session_state.match.get("running", False)):
             pause_match()
     with c3:
         if st.button("Reiniciar"):
@@ -227,9 +239,10 @@ with center_col:
             col = cols[i % 3]
             with col:
                 st.markdown(f"**{nome}**")
-                if st.button("→ Time 1", key=f"avail-to1-{pid}"):
+                # desabilita atribuição enquanto partida estiver rodando
+                if st.button("→ Time 1", key=f"avail-to1-{pid}", disabled=st.session_state.match.get("running", False)):
                     assign_player(pid, 1)
-                if st.button("→ Time 2", key=f"avail-to2-{pid}"):
+                if st.button("→ Time 2", key=f"avail-to2-{pid}", disabled=st.session_state.match.get("running", False)):
                     assign_player(pid, 2)
 
 # --- Left: Time 1 ---
@@ -257,6 +270,37 @@ with right_col:
         for pid, p in team2:
             render_player_block(pid, p, team_num=2)
             st.markdown("---")
+
+# ------------------------
+# Painel de atribuição (abaixo): permite atribuir jogadores a times rapidamente (opcional)
+# ------------------------
+st.markdown("---")
+st.markdown("### Atribuir jogadores rapidamente (lista)")
+assign_cols = st.columns([3,3,2])
+with assign_cols[0]:
+    st.write("Jogadores")
+    for pid, p in sorted(jogadores.items(), key=lambda kv: kv[1].get("nome","")):
+        st.write(f"- {p.get('nome','—')} (ID: {pid})")
+with assign_cols[1]:
+    st.write("Atribuir")
+    for pid, p in sorted(jogadores.items(), key=lambda kv: kv[1].get("nome","")):
+        cur = st.session_state.match["team_assign"].get(pid, 0)
+        # desabilita selectbox enquanto partida estiver rodando
+        choice = st.selectbox(
+            f"team-{pid}",
+            options=[0,1,2],
+            index=cur,
+            format_func=lambda v: "Nenhum" if v==0 else ("Time 1" if v==1 else "Time 2"),
+            key=f"assign-{pid}",
+            disabled=st.session_state.match.get("running", False)
+        )
+        # só atualiza se não estiver rodando
+        if not st.session_state.match.get("running", False):
+            st.session_state.match["team_assign"][pid] = choice
+with assign_cols[2]:
+    if st.button("Salvar atribuições", disabled=st.session_state.match.get("running", False)):
+        st.success("Atribuições salvas.")
+        st.rerun()
 
 # ------------------------
 # Eventos registrados (histórico) com Desfazer
