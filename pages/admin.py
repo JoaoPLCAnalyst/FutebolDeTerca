@@ -72,13 +72,24 @@ def salvar_jogadores(jogadores_dict):
         json.dump(jogadores_dict, f, indent=2, ensure_ascii=False)
 
 # =========================
-# LOGIN
+# REQUISITO: estar logado como admin (global)
+# =========================
+# A página só será exibida se a flag global de admin estiver presente.
+# Se você usa outra página de login que define st.session_state["is_admin"] = True,
+# o acesso será liberado. Caso contrário, a execução é interrompida.
+if not st.session_state.get("is_admin"):
+    st.title("🔐 Área Administrativa")
+    st.warning("Acesso restrito: faça login com o usuário administrador na página de login para acessar esta área.")
+    st.stop()
+
+# =========================
+# LOGIN LOCAL (mantido conforme solicitado)
 # =========================
 if "auth" not in st.session_state:
     st.session_state.auth = False
 
 if not st.session_state.auth:
-    st.title("🔐 Área Administrativa")
+    st.title("🔐 Área Administrativa (login local)")
     senha = st.text_input("Senha", type="password")
     if st.button("Entrar"):
         if senha == PASSWORD:
