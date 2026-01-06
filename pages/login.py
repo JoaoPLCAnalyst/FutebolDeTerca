@@ -4,6 +4,9 @@ import json
 from datetime import datetime
 import time
 
+# Importa a UI administrativa (arquivo admin_ui.py na raiz)
+from admin_ui import render_admin_ui
+
 st.set_page_config(page_title="Login - Fantasy Futebol", layout="wide")
 
 # Diretório de perfis
@@ -165,6 +168,16 @@ if st.button("Entrar"):
     # mensagem de sucesso persistente por uma execução
     st.session_state["login_message"] = f"Bem vindo, {perfil.get('nome_apresentacao', user_id)}!"
 
-    # mostra confirmação imediata e reinicia para propagar session_state
+    # Se for admin, renderiza a UI administrativa imediatamente nesta página
+    if st.session_state.get("is_admin"):
+        st.success(st.session_state["login_message"])
+        # chama a UI administrativa (admin_ui.render_admin_ui)
+        try:
+            render_admin_ui()
+        except Exception as e:
+            st.error(f"Erro ao abrir a área administrativa: {e}")
+        st.stop()
+
+    # caso não seja admin, mostra confirmação e reinicia para propagar session_state
     st.success(st.session_state["login_message"])
     st.rerun()
