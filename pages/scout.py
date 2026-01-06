@@ -3,11 +3,14 @@ import streamlit as st
 import json
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 import tempfile
 import uuid
 import base64
 import requests
+
+# util: função criada por você em utils/match_id.py
+from utils.match_id import create_match_file
 
 st.set_page_config(page_title="Olheiro - Futebol de Terça", layout="wide")
 
@@ -77,6 +80,29 @@ def github_upload(path_local, repo_path, message):
         return False, f"erro ({resp.status_code}): {resp.text}"
 
 # ------------------------
+# Rodadas helpers
+# ------------------------
+def list_open_rodadas():
+    base = os.path.join("database", "rodadas")
+    if not os.path.exists(base):
+        return []
+    rodadas = []
+    for name in sorted(os.listdir(base)):
+        path = os.path.join(base, name)
+        if not os.path.isdir(path):
+            continue
+        meta_path = os.path.join(path, "meta.json")
+        if os.path.exists(meta_path):
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                if meta.get("status") == "open":
+                    rodadas.append(name)
+            except Exception:
+                continue
+    return rodadas
+
+# ------------------------
 # Inicialização
 # ------------------------
 ensure_match_state()
@@ -142,16 +168,19 @@ def record_event(ev_type, team_num, scorer_pid=None, assister_pid=None, delta_sc
         "assister": assister_pid
     }
     st.session_state.match["events"].append(ev)
-    # atualizar placar e jogadores
+    # atualizar placar e jogadores em memória (não grava jogadores.json aqui)
     if ev_type == "gol" and scorer_pid:
         if team_num == 1:
             st.session_state.match["score"]["team1"] += delta_scorer
         else:
             st.session_state.match["score"]["team2"] += delta_scorer
+        # atualiza apenas em memória para exibição imediata
         jogadores[scorer_pid]["gols"] = jogadores[scorer_pid].get("gols", 0) + delta_scorer
     if assister_pid and delta_assister != 0:
         jogadores[assister_pid]["assistencias"] = jogadores[assister_pid].get("assistencias", 0) + delta_assister
-    salvar_jogadores(jogadores)
+    # não salvamos jogadores.json aqui; partidas serão salvas por arquivo dentro da rodada
+    # se desejar persistir incrementos imediatos, descomente a linha abaixo:
+    # salvar_jogadores(jogadores)
 
 def undo_last_event():
     if not st.session_state.match["events"]:
@@ -162,7 +191,7 @@ def undo_last_event():
     team = last.get("team")
     scorer = last.get("scorer")
     assister = last.get("assister")
-    # reverter alterações
+    # reverter alterações em memória
     if ev_type == "gol" and scorer:
         if jogadores.get(scorer):
             jogadores[scorer]["gols"] = max(0, jogadores[scorer].get("gols", 0) - 1)
@@ -173,7 +202,6 @@ def undo_last_event():
     if assister:
         if jogadores.get(assister):
             jogadores[assister]["assistencias"] = max(0, jogadores[assister].get("assistencias", 0) - 1)
-    salvar_jogadores(jogadores)
     st.success("Último evento desfeito.")
     st.rerun()
 
@@ -359,33 +387,21 @@ with events_col:
                 st.write(f"{mm:02d}:{ss:02d} — {ev['team']} — Assistência: **{assister_name}**")
 
 # ------------------------
-# Finalizar / Logout (gera arquivo por rodada e atualiza jogadores.json)
+# Finalizar partida: salva um arquivo de partida dentro da rodada selecionada
 # ------------------------
-def _write_atomic(path, data_bytes):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))
-    os.close(fd)
-    with open(tmp, "wb") as f:
-        f.write(data_bytes)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, path)
+st.markdown("---")
 
-def _rodada_filepath(rodada_id):
-    return os.path.join("database", "rodadas", f"{rodada_id}.json")
+# seleção de rodada (apenas rodadas com meta.json status=open)
+open_rodadas = list_open_rodadas()
+if not open_rodadas:
+    st.info("Nenhuma rodada aberta encontrada. Peça ao administrador para criar uma rodada antes de registrar partidas.")
+    rodada_id = None
+else:
+    rodada_id = st.selectbox("Rodada (selecionar a rodada aberta onde esta partida pertence)", options=open_rodadas)
 
-def _persistir_rodada_e_atualizar_jogadores():
-    # prepara diretório de rodadas
-    rodadas_dir = os.path.join("database", "rodadas")
-    os.makedirs(rodadas_dir, exist_ok=True)
-
-    # gera id e caminho
-    rodada_id = f"rodada-{uuid.uuid4().hex[:8]}"
-    rodada_path = _rodada_filepath(rodada_id)
-
-    # monta resumo_jogadores a partir dos events
+def _build_resumo_from_events(events):
     resumo = {}
-    for ev in st.session_state.match.get("events", []):
+    for ev in events:
         if ev.get("type") == "gol" and ev.get("scorer"):
             pid = ev["scorer"]
             resumo.setdefault(pid, {"gols": 0, "assistencias": 0})
@@ -394,95 +410,57 @@ def _persistir_rodada_e_atualizar_jogadores():
             pid = ev["assister"]
             resumo.setdefault(pid, {"gols": 0, "assistencias": 0})
             resumo[pid]["assistencias"] += 1
+    return resumo
 
-    score = st.session_state.match.get("score", {"team1": 0, "team2": 0})
-    if score.get("team1", 0) > score.get("team2", 0):
-        vencedor = "team1"
-    elif score.get("team2", 0) > score.get("team1", 0):
-        vencedor = "team2"
-    else:
-        vencedor = "empate"
+def _finalize_match_save_file(rodada_id):
+    # força pausa para capturar tempo final consistente
+    if st.session_state.match.get("running"):
+        pause_match()
 
-    rodada_entry = {
-        "id": rodada_id,
-        "timestamp": datetime.utcnow().isoformat() + "Z",
-        "vencedor": vencedor,
-        "placar": score,
+    if not rodada_id:
+        st.error("Nenhuma rodada selecionada. Não é possível salvar a partida.")
+        return False
+
+    matches_dir = os.path.join("database", "rodadas", rodada_id, "matches")
+    os.makedirs(matches_dir, exist_ok=True)
+
+    # montar match_entry
+    now_iso = datetime.now(timezone.utc).isoformat()
+    match_entry = {
+        "rodada_id": rodada_id,
+        "timestamp_start": datetime.fromtimestamp(st.session_state.match["start_time"], tz=timezone.utc).isoformat() if st.session_state.match.get("start_time") else None,
+        "timestamp_end": now_iso,
+        "duration_seconds": int(st.session_state.match.get("elapsed", 0)),
+        "team_assign": st.session_state.match.get("team_assign", {}),
+        "score": st.session_state.match.get("score", {"team1": 0, "team2": 0}),
         "events": st.session_state.match.get("events", []),
-        "resumo_jogadores": resumo
+        "resumo_jogadores": _build_resumo_from_events(st.session_state.match.get("events", []))
     }
 
-    # idempotência simples: se arquivo já existe, aborta
-    if os.path.exists(rodada_path):
-        st.warning("Rodada já registrada. Operação abortada.")
-        return False
-
-    # grava rodada atômica
+    # cria arquivo de partida usando sua utilidade create_match_file
     try:
-        _write_atomic(rodada_path, json.dumps(rodada_entry, ensure_ascii=False, indent=2).encode("utf-8"))
+        match_id, filepath = create_match_file(matches_dir, match_entry)
     except Exception as e:
-        st.error(f"Falha ao salvar arquivo da rodada: {e}")
+        st.error(f"Falha ao criar arquivo de partida: {e}")
         return False
 
-    # atualiza jogadores.json incrementando totais
-    try:
-        # carrega do disco para evitar sobrescrever mudanças externas
-        if os.path.exists(JOGADORES_FILE):
-            with open(JOGADORES_FILE, "r", encoding="utf-8") as f:
-                jogadores_on_disk = json.load(f)
+    # opcional: upload para GitHub do arquivo de partida
+    if GITHUB_USER and GITHUB_REPO and GITHUB_TOKEN:
+        ok, out = github_upload(filepath, f"database/rodadas/{rodada_id}/matches/{os.path.basename(filepath)}", f"Adiciona partida {match_id} em {rodada_id}")
+        if not ok:
+            st.warning(f"Partida salva localmente em {filepath}, mas falha ao enviar para GitHub: {out}")
         else:
-            jogadores_on_disk = {}
+            st.info(f"Partida enviada ao GitHub ({out}).")
 
-        # aplica incrementos do resumo
-        for pid, vals in resumo.items():
-            if pid not in jogadores_on_disk:
-                # cria registro mínimo se não existir
-                jogadores_on_disk[pid] = {
-                    "nome": pid,
-                    "valor": 0,
-                    "gols": 0,
-                    "assistencias": 0,
-                    "imagem": ""
-                }
-            jogadores_on_disk[pid]["gols"] = jogadores_on_disk[pid].get("gols", 0) + vals.get("gols", 0)
-            jogadores_on_disk[pid]["assistencias"] = jogadores_on_disk[pid].get("assistencias", 0) + vals.get("assistencias", 0)
-
-        # incrementa vitorias por jogador se desejar: aqui incrementa vitorias para todos do time vencedor
-        if vencedor in ("team1", "team2"):
-            for pid, team in st.session_state.match.get("team_assign", {}).items():
-                if team == (1 if vencedor == "team1" else 2):
-                    jogadores_on_disk[pid]["vitorias"] = jogadores_on_disk[pid].get("vitorias", 0) + 1
-
-        # grava jogadores.json atômico
-        _write_atomic(JOGADORES_FILE, json.dumps(jogadores_on_disk, ensure_ascii=False, indent=2).encode("utf-8"))
-
-        # opcional: upload para GitHub dos arquivos novos/alterados
-        if GITHUB_USER and GITHUB_REPO and GITHUB_TOKEN:
-            ok1, out1 = github_upload(rodada_path, f"database/rodadas/{os.path.basename(rodada_path)}", f"Adiciona rodada {rodada_id}")
-            ok2, out2 = github_upload(JOGADORES_FILE, JOGADORES_FILE, f"Atualiza jogadores após {rodada_id}")
-            if not ok1:
-                st.warning(f"Rodada salva localmente, mas falha ao enviar para GitHub: {out1}")
-            if not ok2:
-                st.warning(f"Jogadores atualizados localmente, mas falha ao enviar para GitHub: {out2}")
-
-    except Exception as e:
-        st.error(f"Falha ao atualizar jogadores: {e}")
-        # opcional: remover o arquivo de rodada se desejar rollback
-        return False
-
+    st.success(f"Partida salva: {match_id}")
     return True
 
-# Botões finais: Finalizar partida e Sair (olheiro)
-st.markdown("---")
 end_col1, end_col2 = st.columns([1,1])
 with end_col1:
-    if st.button("Finalizar partida (reiniciar estado)"):
-        ok = _persistir_rodada_e_atualizar_jogadores()
+    if st.button("Finalizar partida (salvar partida na rodada)"):
+        ok = _finalize_match_save_file(rodada_id)
         if ok:
             reset_match()
-            st.success("Partida finalizada, resultado registrado e estado reiniciado.")
-        else:
-            st.error("Ocorreu um problema ao registrar a rodada; verifique os logs e tente novamente.")
         st.rerun()
 with end_col2:
     if st.button("Sair (olheiro)"):
