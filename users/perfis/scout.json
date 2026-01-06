@@ -1,0 +1,15 @@
+{
+  "user_id": "olheiro",
+  "nome_apresentacao": "Olheiro",
+  "email": "olheiro@seudominio.com",
+  "criado_em": "2026-01-05T20:06:00Z",
+  "ultimo_login": null,
+  "roles": ["olheiro"],
+  "meta": {
+    "descricao": "Conta administrativa com privilégios completos"
+  },
+  "stats": {
+    "logins": 0,
+    "acoes_administrativas": 0
+  }
+}
