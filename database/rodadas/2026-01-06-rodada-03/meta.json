@@ -3,11 +3,12 @@
   "nome": "teste2",
   "admin": "admin",
   "inicio": "2026-01-06T22:28:12.716301+00:00",
-  "fim": null,
-  "status": "open",
+  "fim": "2026-01-06T22:30:05.745571+00:00",
+  "status": "closed",
   "matches": [
     "2026-01-06-match-01",
     "2026-01-06-match-02"
   ],
-  "match_count": 2
+  "match_count": 2,
+  "summary_file": "summary.json"
 }
