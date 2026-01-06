@@ -493,3 +493,51 @@ else:
         else:
             st.error(msg)
         st.rerun()
+# --- Bloco de diagnóstico temporário (cole para depurar) ---
+st.markdown("---")
+st.subheader("🔎 Diagnóstico rápido de fechamento")
+
+def diagnostico_fechar(rodada_id):
+    st.write("Rodada selecionada:", rodada_id)
+    base = os.path.join("database", "rodadas", rodada_id)
+    meta_path = os.path.join(base, "meta.json")
+    summary_path = os.path.join(base, "summary.json")
+    matches_dir = os.path.join(base, "matches")
+
+    st.write("Arquivos esperados:")
+    st.write("- meta:", meta_path, "exists?", os.path.exists(meta_path))
+    st.write("- summary:", summary_path, "exists?", os.path.exists(summary_path))
+    st.write("- matches dir:", matches_dir, "exists?", os.path.exists(matches_dir))
+    st.write("- lista de matches:", sorted(os.listdir(matches_dir)) if os.path.exists(matches_dir) else "n/a")
+
+    # mostra conteúdo curto de meta e summary
+    def _peek_json(p):
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                j = json.load(f)
+            return j
+        except Exception as e:
+            return f"ERRO ao ler {p}: {e}"
+
+    st.write("meta.json (atual):")
+    st.json(_peek_json(meta_path))
+    st.write("summary.json (atual):")
+    st.json(_peek_json(summary_path))
+
+    # tenta executar fechar_rodada em modo dry-run: captura retorno e exceção
+    try:
+        ok, msg = fechar_rodada(rodada_id, fazer_backup_jogadores=True, github_upload_enabled=False)
+        st.write("fechar_rodada retornou:", ok, msg)
+    except Exception as e:
+        st.error(f"fechar_rodada lançou exceção: {e}")
+        import traceback
+        st.text(traceback.format_exc())
+
+rodada_debug = None
+if os.path.exists(os.path.join("database", "rodadas")):
+    opts = [n for n in sorted(os.listdir("database/rodadas")) if os.path.isdir(os.path.join("database/rodadas", n))]
+    if opts:
+        rodada_debug = st.selectbox("Rodada para diagnóstico", opts)
+if rodada_debug:
+    if st.button("Executar diagnóstico de fechamento"):
+        diagnostico_fechar(rodada_debug)
