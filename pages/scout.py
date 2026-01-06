@@ -11,6 +11,8 @@ import requests
 
 # util: função criada por você em utils/match_id.py
 from utils.match_id import create_match_file
+# util: função criada por você em utils/rodadas.py
+from utils.rodadas import add_match_to_meta
 
 st.set_page_config(page_title="Olheiro - Futebol de Terça", layout="wide")
 
@@ -179,8 +181,6 @@ def record_event(ev_type, team_num, scorer_pid=None, assister_pid=None, delta_sc
     if assister_pid and delta_assister != 0:
         jogadores[assister_pid]["assistencias"] = jogadores[assister_pid].get("assistencias", 0) + delta_assister
     # não salvamos jogadores.json aqui; partidas serão salvas por arquivo dentro da rodada
-    # se desejar persistir incrementos imediatos, descomente a linha abaixo:
-    # salvar_jogadores(jogadores)
 
 def undo_last_event():
     if not st.session_state.match["events"]:
@@ -443,6 +443,21 @@ def _finalize_match_save_file(rodada_id):
     except Exception as e:
         st.error(f"Falha ao criar arquivo de partida: {e}")
         return False
+
+    # adiciona partida ao meta.json da rodada (idempotente)
+    try:
+        added = add_match_to_meta(rodada_id, match_id)
+        if added:
+            # opcional: upload meta.json ao GitHub
+            meta_path = os.path.join("database", "rodadas", rodada_id, "meta.json")
+            if GITHUB_USER and GITHUB_REPO and GITHUB_TOKEN and os.path.exists(meta_path):
+                ok_meta, out_meta = github_upload(meta_path, f"database/rodadas/{rodada_id}/meta.json", f"Atualiza meta da rodada {rodada_id} com {match_id}")
+                if not ok_meta:
+                    st.warning(f"Meta da rodada atualizada localmente, mas falha ao enviar para GitHub: {out_meta}")
+        else:
+            st.info("Partida já estava registrada na meta da rodada (idempotente).")
+    except Exception as e:
+        st.warning(f"Partida salva, mas falha ao atualizar meta da rodada: {e}")
 
     # opcional: upload para GitHub do arquivo de partida
     if GITHUB_USER and GITHUB_REPO and GITHUB_TOKEN:
