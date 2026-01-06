@@ -6,8 +6,6 @@ import re
 import uuid
 import io
 from PIL import Image
-import base64
-import requests
 
 st.set_page_config(page_title="Admin - Futebol de Terça", page_icon="⚽")
 
@@ -18,11 +16,6 @@ JOGADORES_FILE = "database/jogadores.json"
 IMAGENS_DIR = "imagens/jogadores"
 os.makedirs("database", exist_ok=True)
 os.makedirs(IMAGENS_DIR, exist_ok=True)
-
-# -----------------------
-# Secrets esperados
-# -----------------------
-ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD")  # senha do admin definida em secrets.toml
 
 # -----------------------
 # Utilitários
@@ -57,35 +50,20 @@ def salvar_jogadores(jogadores_dict):
         json.dump(jogadores_dict, f, indent=2, ensure_ascii=False)
 
 # -----------------------
-# Autenticação local na página (senha)
+# Proteção: só expor se login global for admin
 # -----------------------
-if "admin_authenticated" not in st.session_state:
-    st.session_state.admin_authenticated = False
-
-st.title("Área Administrativa — Cadastro de Jogadores")
-
-if not st.session_state.admin_authenticated:
-    st.info("A página está visível, mas é necessária a senha do administrador para operar.")
-    senha = st.text_input("Senha do administrador", type="password")
-    if st.button("Entrar como admin"):
-        if ADMIN_PASSWORD is None:
-            st.error("Senha de administrador não configurada (verifique secrets).")
-        elif senha == ADMIN_PASSWORD:
-            st.session_state.admin_authenticated = True
-            # reafirma is_admin para compatibilidade com outras páginas
-            st.session_state["is_admin"] = True
-            st.success("Autenticado como administrador.")
-            st.rerun()
-        else:
-            st.error("Senha incorreta.")
+if not st.session_state.get("is_admin"):
+    st.title("Área Administrativa")
+    st.warning("Acesso restrito: faça login com o usuário administrador para acessar esta página.")
     st.stop()
 
 # -----------------------
-# UI administrativa (autenticado)
+# UI administrativa (autenticado globalmente)
 # -----------------------
-st.markdown("### ⚽ Cadastro de Jogadores")
+st.title("Área Administrativa — Cadastro de Jogadores")
+st.markdown("Você está autenticado como administrador.")
 
-# Formulário simples (não usar clear_on_submit=True para não perder uploader)
+# Formulário simples
 nome = st.text_input("Nome do jogador")
 imagem = st.file_uploader("Imagem do jogador (PNG/JPG)", type=["png", "jpg", "jpeg"])
 
@@ -123,7 +101,6 @@ if st.button("Cadastrar jogador"):
 
             # 4) Reafirma sessão admin (proteção extra) e dá feedback
             st.session_state["is_admin"] = True
-            st.session_state.admin_authenticated = True
             st.success("✅ Jogador cadastrado com sucesso.")
             # atualiza lista local sem forçar rerun
             jogadores = jogadores_dict
@@ -167,10 +144,8 @@ else:
 
 st.markdown("---")
 if st.button("Sair (admin)"):
-    # logout local da página (não apaga session_state globalmente, apenas flags relacionadas)
+    # logout local da página: remove apenas a flag admin
     if "is_admin" in st.session_state:
         del st.session_state["is_admin"]
-    if "admin_authenticated" in st.session_state:
-        del st.session_state["admin_authenticated"]
     st.success("Logout efetuado.")
     st.rerun()
