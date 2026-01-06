@@ -1,197 +1,170 @@
-# pages/admin.py
 import streamlit as st
 import json
 import os
-import base64
+import re
 import uuid
-from datetime import datetime
-from github import Github, GithubException
+import io
+from PIL import Image
+import base64, requests
 
-st.set_page_config(page_title="Administração", layout="centered")
+# =========================
+# CONFIGURAÇÃO DA PÁGINA
+# =========================
+st.set_page_config(page_title="Admin - Futebol de Terça", page_icon="⚽")
 
-# ------------------------
-# Config paths
-# ------------------------
-DATABASE_PATH = "database/jogadores.json"
+PASSWORD = st.secrets["ADMIN_PASSWORD"]
+
+JOGADORES_FILE = "database/jogadores.json"
 IMAGENS_DIR = "imagens/jogadores"
-os.makedirs(os.path.dirname(DATABASE_PATH) or ".", exist_ok=True)
+os.makedirs("database", exist_ok=True)
 os.makedirs(IMAGENS_DIR, exist_ok=True)
 
-# ------------------------
-# GitHub / secrets
-# ------------------------
-GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN")
-GITHUB_REPO = st.secrets.get("GITHUB_REPO")  # formato "owner/repo"
+# =========================
+# GITHUB CONFIG (opcional)
+# =========================
+GITHUB_USER = st.secrets.get("GITHUB_USER", "")
+GITHUB_REPO = st.secrets.get("GITHUB_REPO", "")
+GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
 GITHUB_BRANCH = st.secrets.get("GITHUB_BRANCH", "main")
 
-def github_repo():
-    if not GITHUB_TOKEN or not GITHUB_REPO:
-        raise RuntimeError("GITHUB_TOKEN ou GITHUB_REPO não configurados em secrets")
-    g = Github(GITHUB_TOKEN)
-    return g.get_repo(GITHUB_REPO)
+def github_upload(path_local, repo_path, message):
+    """Envia arquivo local ao GitHub (opcional)."""
+    if not GITHUB_USER or not GITHUB_REPO or not GITHUB_TOKEN:
+        return None
+    headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"}
+    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{repo_path}"
+    with open(path_local, "rb") as f:
+        content_b64 = base64.b64encode(f.read()).decode()
+    get_file = requests.get(url, headers=headers)
+    sha = get_file.json().get("sha") if get_file.status_code == 200 else None
+    payload = {"message": message, "content": content_b64}
+    if sha:
+        payload["sha"] = sha
+    return requests.put(url, headers=headers, json=payload)
 
-def github_upload(local_path, repo_path, message, branch=None):
-    branch = branch or GITHUB_BRANCH
-    repo = github_repo()
-    with open(local_path, "rb") as f:
-        raw = f.read()
-    content_b64 = base64.b64encode(raw).decode()
-    try:
-        file = repo.get_contents(repo_path, ref=branch)
-        repo.update_file(path=repo_path, message=message, content=content_b64, sha=file.sha, branch=branch)
-        return True, "updated"
-    except GithubException as e:
-        if e.status == 404:
-            try:
-                repo.create_file(path=repo_path, message=message, content=content_b64, branch=branch)
-                return True, "created"
-            except Exception as e2:
-                return False, f"Erro ao criar arquivo no repo: {e2}"
-        else:
-            return False, f"Erro GitHub: {e.data if hasattr(e,'data') else str(e)}"
-    except Exception as e:
-        return False, f"Erro inesperado: {e}"
+# =========================
+# UTILITÁRIOS
+# =========================
+def slugify(text: str) -> str:
+    text = text.lower().strip()
+    text = re.sub(r"[^a-z0-9\-_ ]", "", text)
+    text = re.sub(r"\s+", "-", text)
+    return text
 
-# ------------------------
-# JSON helpers
-# ------------------------
+def resize_image_bytes(uploaded_file_bytes: bytes, max_size=(800, 800), quality=85) -> bytes:
+    buf = io.BytesIO(uploaded_file_bytes)
+    img = Image.open(buf)
+    img = img.convert("RGB")
+    img.thumbnail(max_size)
+    out = io.BytesIO()
+    img.save(out, format="JPEG", quality=quality)
+    out.seek(0)
+    return out.read()
+
 def carregar_jogadores():
-    if not os.path.exists(DATABASE_PATH):
+    if not os.path.exists(JOGADORES_FILE):
         return {}
-    try:
-        with open(DATABASE_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
+    with open(JOGADORES_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-def salvar_jogadores(jogadores):
-    # grava localmente primeiro
-    with open(DATABASE_PATH, "w", encoding="utf-8") as f:
-        json.dump(jogadores, f, indent=4, ensure_ascii=False)
+def salvar_jogadores(jogadores_dict):
+    with open(JOGADORES_FILE, "w", encoding="utf-8") as f:
+        json.dump(jogadores_dict, f, indent=2, ensure_ascii=False)
 
-    # tenta enviar para o GitHub (se configurado)
-    if GITHUB_TOKEN and GITHUB_REPO:
-        ok, out = github_upload(DATABASE_PATH, DATABASE_PATH, "Atualiza jogadores.json", branch=GITHUB_BRANCH)
-        return ok, out
-    return True, "gravado localmente (sem upload GitHub)"
+# =========================
+# LOGIN
+# =========================
+if "auth" not in st.session_state:
+    st.session_state.auth = False
 
-# ------------------------
-# Proteção de acesso
-# ------------------------
-if not st.session_state.get("is_admin"):
-    st.title("Área Administrativa")
-    st.warning("Acesso restrito: faça login com o usuário administrador para acessar esta página.")
+if not st.session_state.auth:
+    st.title("🔐 Área Administrativa")
+    senha = st.text_input("Senha", type="password")
+    if st.button("Entrar"):
+        if senha == PASSWORD:
+            st.session_state.auth = True
+            st.rerun()
+        else:
+            st.error("Senha incorreta")
     st.stop()
 
-# ------------------------
-# UI administrativa
-# ------------------------
-st.title("Área Administrativa — Cadastro de Jogadores")
-st.markdown("Você está autenticado como administrador.")
+# =========================
+# INTERFACE
+# =========================
+st.title("⚽ Cadastro de Jogadores")
 
-with st.expander("Debug paths e secrets", expanded=False):
-    st.write("DATABASE_PATH:", os.path.abspath(DATABASE_PATH))
-    st.write("IMAGENS_DIR:", os.path.abspath(IMAGENS_DIR))
-    st.write("GITHUB configured:", bool(GITHUB_TOKEN and GITHUB_REPO))
-
-# Formulário de cadastro
-st.subheader("➕ Adicionar jogador")
 nome = st.text_input("Nome do jogador")
-valor = st.number_input("Valor", min_value=0, value=10, step=1)
-foto = st.file_uploader("Foto do jogador", type=["jpg", "jpeg", "png"])
+imagem = st.file_uploader("Imagem do jogador (PNG/JPG)", type=["png", "jpg", "jpeg"])
 
-if st.button("Salvar jogador"):
-    if not nome:
-        st.error("Informe o nome do jogador")
+# =========================
+# CADASTRAR JOGADOR
+# =========================
+if st.button("Cadastrar jogador"):
+    if not nome or imagem is None:
+        st.error("Preencha o nome e envie uma imagem")
         st.stop()
 
-    # id único baseado em nome + uuid curto
-    player_id = f"{nome.lower().strip().replace(' ', '-')}-{uuid.uuid4().hex[:8]}"
+    # Processar imagem
+    ext = imagem.name.split(".")[-1].lower()
+    if ext == "jpeg":
+        ext = "jpg"
+    img_filename = f"{slugify(nome)}-{uuid.uuid4().hex[:8]}.jpg"
+    img_path = os.path.join(IMAGENS_DIR, img_filename)
 
-    foto_path = ""
-    if foto:
-        os.makedirs(IMAGENS_DIR, exist_ok=True)
-        foto_filename = f"{player_id}.jpg"
-        foto_local = os.path.join(IMAGENS_DIR, foto_filename)
-        try:
-            with open(foto_local, "wb") as f:
-                f.write(foto.getbuffer())
-        except Exception as e:
-            st.exception(e)
-            st.error("Falha ao gravar imagem localmente. Verifique permissões.")
-            st.stop()
+    raw_bytes = imagem.getvalue()
+    processed_bytes = resize_image_bytes(raw_bytes)
 
-        # tenta enviar para o GitHub (se configurado)
-        if GITHUB_TOKEN and GITHUB_REPO:
-            ok, out = github_upload(foto_local, f"{IMAGENS_DIR}/{foto_filename}", f"Adiciona imagem do jogador {nome}", branch=GITHUB_BRANCH)
-            if not ok:
-                st.warning(f"Imagem gravada localmente em {foto_local}, mas falha ao enviar para GitHub: {out}")
-            else:
-                st.info(f"Imagem enviada ao GitHub ({out}).")
-        else:
-            st.info("Imagem gravada localmente (upload GitHub desativado).")
+    with open(img_path, "wb") as f:
+        f.write(processed_bytes)
 
-        foto_path = f"{IMAGENS_DIR}/{foto_filename}"
-
-    # monta registro com os campos que você definiu
-    jogadores = carregar_jogadores()
-    jogadores[player_id] = {
+    # Atualizar jogadores.json
+    jogadores_dict = carregar_jogadores()
+    player_id = f"{slugify(nome)}-{uuid.uuid4().hex[:8]}"
+    novo_jogador = {
         "nome": nome,
-        "valor": int(valor),
+        "valor": 10,
         "gols": 0,
         "assistencias": 0,
-        "imagem": foto_path,
-        "criado_em": datetime.utcnow().isoformat() + "Z"
+        "imagem": img_path
     }
+    jogadores_dict[player_id] = novo_jogador
+    salvar_jogadores(jogadores_dict)
 
-    ok, out = salvar_jogadores(jogadores)
-    if ok:
-        st.success(f"Jogador '{nome}' cadastrado.")
-        if out:
-            st.info(out)
-    else:
-        st.error(f"Jogador salvo localmente, mas falha ao atualizar repo: {out}")
+    # Upload opcional ao GitHub
+    github_upload(img_path, f"{IMAGENS_DIR}/{img_filename}", f"Adiciona imagem do jogador {nome}")
+    github_upload(JOGADORES_FILE, JOGADORES_FILE, f"Atualiza jogadores.json com {nome}")
 
+    st.success("✅ Jogador cadastrado!")
     st.rerun()
 
-# ------------------------
-# Listagem de jogadores
-# ------------------------
-st.markdown("---")
-st.subheader("📋 Jogadores cadastrados")
+# =========================
+# LISTA DE JOGADORES
+# =========================
+st.markdown("### 📋 Jogadores cadastrados")
 
-jogadores = carregar_jogadores()
-if not jogadores:
+jogadores_dict = carregar_jogadores()
+
+if not jogadores_dict:
     st.info("Nenhum jogador cadastrado")
 else:
-    # ordena por nome (campo 'nome') para exibição consistente
-    sorted_items = sorted(jogadores.items(), key=lambda x: str(x[1].get("nome", "")).lower())
-    for pid, rec in sorted_items:
-        cols = st.columns([1, 4])
-        with cols[0]:
-            img = rec.get("imagem", "")
-            if img:
-                if GITHUB_REPO:
-                    url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/{img}"
-                    st.image(url, width=80)
-                else:
-                    if os.path.exists(img):
-                        st.image(img, width=80)
-                    else:
-                        st.write("Sem imagem")
-            else:
-                st.write("Sem imagem")
-        with cols[1]:
-            st.markdown(f"**{rec.get('nome','—')}**")
-            st.write(f"Valor: {rec.get('valor', '—')}  |  Gols: {rec.get('gols', 0)}  |  Assistências: {rec.get('assistencias', 0)}")
-            st.caption(f"ID: {pid}")
-
-# ------------------------
-# Excluir e logout
-# ------------------------
-st.markdown("---")
-if st.button("Sair (admin)"):
-    if "is_admin" in st.session_state:
-        del st.session_state["is_admin"]
-    st.success("Logout efetuado.")
-    st.rerun()
+    sorted_items = sorted(jogadores_dict.items(), key=lambda kv: kv[1].get("nome", "").lower())
+    for player_id, j in sorted_items:
+        col1, col2, col3 = st.columns([1, 3, 1])
+        with col1:
+            if os.path.exists(j["imagem"]):
+                st.image(j["imagem"], width=80)
+        with col2:
+            st.write(f"**{j.get('nome', '—')}**")
+            st.write(f"Gols: {j.get('gols', 0)} | Assistências: {j.get('assistencias', 0)}")
+            st.caption(f"ID: {player_id}")
+        with col3:
+            if st.button("🗑️ Excluir", key=f"del-{player_id}"):
+                jogadores_dict.pop(player_id)
+                salvar_jogadores(jogadores_dict)
+                try:
+                    os.remove(j["imagem"])
+                except Exception:
+                    pass
+                github_upload(JOGADORES_FILE, JOGADORES_FILE, f"Remove jogador {j['nome']}")
+                st.success(f"Jogador {j['nome']} excluído!")
+                st.rerun()
