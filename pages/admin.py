@@ -441,14 +441,60 @@ def fechar_rodada(rodada_id, fazer_backup_jogadores=True, github_upload_enabled=
         return False, f"Falha ao atualizar jogadores.json: {e}"
 
     # atualiza meta.json com fim e status closed e match_count
+        # atualiza meta.json somente após sucesso completo, com verificação
     try:
         meta["fim"] = datetime.now(timezone.utc).isoformat()
         meta["status"] = "closed"
         meta["summary_file"] = os.path.basename(summary_path)
         meta["match_count"] = len(matches_list)
         _write_atomic(meta_path, json.dumps(meta, ensure_ascii=False, indent=2).encode("utf-8"))
+
+        # leitura de verificação imediata
+        verified = False
+        for attempt in range(3):
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    meta_check = json.load(f)
+                if meta_check.get("status") == "closed" and meta_check.get("fim"):
+                    verified = True
+                    break
+            except Exception:
+                pass
+            # pequena espera antes de tentar de novo
+            import time as _time
+            _time.sleep(0.1)
+
+        if not verified:
+            # tenta uma segunda escrita antes de falhar
+            try:
+                _write_atomic(meta_path, json.dumps(meta, ensure_ascii=False, indent=2).encode("utf-8"))
+            except Exception as e:
+                # registra erro e retorna
+                meta["status"] = "error"
+                meta["error_message"] = f"Falha ao gravar meta.json: {e}"
+                try:
+                    _write_atomic(meta_path, json.dumps(meta, ensure_ascii=False, indent=2).encode("utf-8"))
+                except Exception:
+                    pass
+                return False, f"Falha ao confirmar gravação de meta.json: {e}"
+            # última verificação
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    meta_check = json.load(f)
+                if meta_check.get("status") != "closed":
+                    return False, "Gravado meta.json, mas verificação final falhou (status diferente de closed)."
+            except Exception as e:
+                return False, f"Gravado meta.json, mas não foi possível ler para verificação: {e}"
+
     except Exception as e:
-        return False, f"Falha ao atualizar meta.json: {e}"
+        # registra erro e marca meta como error para investigação
+        try:
+            meta["status"] = "error"
+            meta["error_message"] = str(e)
+            _write_atomic(meta_path, json.dumps(meta, ensure_ascii=False, indent=2).encode("utf-8"))
+        except Exception:
+            pass
+        return False, f"Erro ao fechar rodada (atualizando meta.json): {e}"
 
     # upload GitHub opcional
     if github_upload_enabled and GITHUB_USER and GITHUB_REPO and GITHUB_TOKEN:
