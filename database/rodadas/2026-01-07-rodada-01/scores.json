@@ -1,0 +1,23 @@
+{
+  "rodada_id": "2026-01-07-rodada-01",
+  "timestamp": "2026-01-07T00:13:24.808415+00:00",
+  "points_formula": {
+    "gol": 8,
+    "assist": 4,
+    "vitoria": 4
+  },
+  "scores": {
+    "joao-5c0f835c": {
+      "gols": 3,
+      "assistencias": 0,
+      "vitorias": 1,
+      "pontos": 28
+    },
+    "eudes-4655e992": {
+      "gols": 1,
+      "assistencias": 0,
+      "vitorias": 0,
+      "pontos": 8
+    }
+  }
+}
