@@ -3,10 +3,11 @@
   "nome": "Rodada 2026-01-07",
   "admin": "admin",
   "inicio": "2026-01-07T00:12:38.808642+00:00",
-  "fim": null,
-  "status": "open",
+  "fim": "2026-01-07T00:13:25.728709+00:00",
+  "status": "closed",
   "matches": [
     "2026-01-07-match-01"
   ],
-  "match_count": 1
+  "match_count": 1,
+  "summary_file": "summary.json"
 }
