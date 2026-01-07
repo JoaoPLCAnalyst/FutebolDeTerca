@@ -5,6 +5,8 @@
   "inicio": "2026-01-07T00:12:38.808642+00:00",
   "fim": null,
   "status": "open",
-  "matches": [],
-  "match_count": 0
+  "matches": [
+    "2026-01-07-match-01"
+  ],
+  "match_count": 1
 }
