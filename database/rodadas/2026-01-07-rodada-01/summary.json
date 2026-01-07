@@ -1,0 +1,37 @@
+{
+  "rodada_id": "2026-01-07-rodada-01",
+  "timestamp_closed": "2026-01-07T00:13:24.808415+00:00",
+  "matches": [
+    "2026-01-07-match-01"
+  ],
+  "placar_por_partida": {
+    "2026-01-07-match-01": {
+      "team1": 3,
+      "team2": 1
+    }
+  },
+  "resumo_por_jogador": {
+    "joao-5c0f835c": {
+      "gols": 3,
+      "assistencias": 0,
+      "vitorias": 1
+    },
+    "eudes-4655e992": {
+      "gols": 1,
+      "assistencias": 0,
+      "vitorias": 0
+    }
+  },
+  "meta_snapshot": {
+    "id": "2026-01-07-rodada-01",
+    "nome": "Rodada 2026-01-07",
+    "admin": "admin",
+    "inicio": "2026-01-07T00:12:38.808642+00:00",
+    "fim": null,
+    "status": "open",
+    "matches": [
+      "2026-01-07-match-01"
+    ],
+    "match_count": 1
+  }
+}
